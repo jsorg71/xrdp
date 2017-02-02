@@ -1,7 +1,7 @@
 /**
  * xrdp: A Remote Desktop Protocol server.
  *
- * Copyright (C) Jay Sorg 2004-2014
+ * Copyright (C) Jay Sorg 2004-2017
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,10 +28,10 @@ list_create(void)
 {
     struct list *self;
 
-    self = (struct list *)g_malloc(sizeof(struct list), 1);
+    self = g_new0(struct list, 1);
     self->grow_by = 10;
     self->alloc_size = 10;
-    self->items = (tbus *)g_malloc(sizeof(tbus) * 10, 1);
+    self->items = g_new0(intptr_t, 10);
     return self;
 }
 
@@ -41,7 +41,7 @@ list_delete(struct list *self)
 {
     int i;
 
-    if (self == 0)
+    if (self == NULL)
     {
         return;
     }
@@ -50,7 +50,7 @@ list_delete(struct list *self)
     {
         for (i = 0; i < self->count; i++)
         {
-            g_free((void *)self->items[i]);
+            g_free((void *) (self->items[i]));
             self->items[i] = 0;
         }
     }
@@ -61,17 +61,17 @@ list_delete(struct list *self)
 
 /*****************************************************************************/
 void APP_CC
-list_add_item(struct list *self, tbus item)
+list_add_item(struct list *self, intptr_t item)
 {
-    tbus *p;
+    intptr_t *p;
     int i;
 
     if (self->count >= self->alloc_size)
     {
         i = self->alloc_size;
         self->alloc_size += self->grow_by;
-        p = (tbus *)g_malloc(sizeof(tbus) * self->alloc_size, 1);
-        g_memcpy(p, self->items, sizeof(tbus) * i);
+        p = g_new0(intptr_t, self->alloc_size);
+        g_memcpy(p, self->items, sizeof(intptr_t) * i);
         g_free(self->items);
         self->items = p;
     }
@@ -81,7 +81,7 @@ list_add_item(struct list *self, tbus item)
 }
 
 /*****************************************************************************/
-tbus APP_CC
+intptr_t APP_CC
 list_get_item(const struct list *self, int index)
 {
     if (index < 0 || index >= self->count)
@@ -102,7 +102,7 @@ list_clear(struct list *self)
     {
         for (i = 0; i < self->count; i++)
         {
-            g_free((void *)self->items[i]);
+            g_free((void *) (self->items[i]));
             self->items[i] = 0;
         }
     }
@@ -111,12 +111,12 @@ list_clear(struct list *self)
     self->count = 0;
     self->grow_by = 10;
     self->alloc_size = 10;
-    self->items = (tbus *)g_malloc(sizeof(tbus) * 10, 1);
+    self->items = g_new0(intptr_t, 10);
 }
 
 /*****************************************************************************/
 int APP_CC
-list_index_of(struct list *self, tbus item)
+list_index_of(struct list *self, intptr_t item)
 {
     int i;
 
@@ -141,7 +141,7 @@ list_remove_item(struct list *self, int index)
     {
         if (self->auto_free)
         {
-            g_free((void *)self->items[index]);
+            g_free((void *) (self->items[index]));
             self->items[index] = 0;
         }
 
@@ -156,9 +156,9 @@ list_remove_item(struct list *self, int index)
 
 /*****************************************************************************/
 void APP_CC
-list_insert_item(struct list *self, int index, tbus item)
+list_insert_item(struct list *self, int index, intptr_t item)
 {
-    tbus *p;
+    intptr_t *p;
     int i;
 
     if (index == self->count)
@@ -175,8 +175,8 @@ list_insert_item(struct list *self, int index, tbus item)
         {
             i = self->alloc_size;
             self->alloc_size += self->grow_by;
-            p = (tbus *)g_malloc(sizeof(tbus) * self->alloc_size, 1);
-            g_memcpy(p, self->items, sizeof(tbus) * i);
+            p = g_new0(intptr_t, self->alloc_size);
+            g_memcpy(p, self->items, sizeof(intptr_t) * i);
             g_free(self->items);
             self->items = p;
         }
@@ -197,14 +197,14 @@ void APP_CC
 list_append_list_strdup(struct list *self, struct list *dest, int start_index)
 {
     int index;
-    tbus item;
+    intptr_t item;
     char *dup;
 
     for (index = start_index; index < self->count; index++)
     {
         item = list_get_item(self, index);
-        dup = g_strdup((char *)item);
-        list_add_item(dest, (tbus)dup);
+        dup = g_strdup((char *) item);
+        list_add_item(dest, (intptr_t) dup);
     }
 }
 
