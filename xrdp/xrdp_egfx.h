@@ -64,6 +64,9 @@
 #define XR_RDPGFX_CMDID_MAPSURFACETOSCALEDOUTPUT    0x0017
 #define XR_RDPGFX_CMDID_MAPSURFACETOSCALEDWINDOW    0x0018
 
+#define XR_QUEUE_DEPTH_UNAVAILABLE          0x00000000
+#define XR_SUSPEND_FRAME_ACKNOWLEDGEMENT    0xFFFFFFFF
+
 /* The bitmap data encapsulated in the bitmapData field is uncompressed.
    Pixels in the uncompressed data are ordered from left to right and then
    top to bottom. */

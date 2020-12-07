@@ -1234,7 +1234,7 @@ xrdp_mm_egfx_frame_ack(void* user, int queue_depth, int frame_id,
     LLOGLN(10, ("xrdp_mm_egfx_frame_ack:"));
     self = (struct xrdp_mm *) user;
     encoder = self->encoder;
-    if (queue_depth == -1) /* SUSPEND_FRAME_ACKNOWLEDGEMENT */
+    if (queue_depth == XR_SUSPEND_FRAME_ACKNOWLEDGEMENT)
     {
         LLOGLN(0, ("xrdp_mm_egfx_frame_ack: queue_depth %d frame_id %d "
                "frames_decoded %d", queue_depth, frame_id, frames_decoded));
