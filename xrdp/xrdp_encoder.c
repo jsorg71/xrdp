@@ -50,6 +50,13 @@
 
 #define XRDP_SURCMD_PREFIX_BYTES 256
 
+/* LH3 LL3, HH3 HL3, HL2 LH2, LH1 HH2, HH1 HL1 todo check this */
+static const unsigned char g_rfx_quantization_values[] =
+{
+    0x66, 0x66, 0x77, 0x88, 0x98,
+    0x76, 0x77, 0x88, 0x98, 0xA9
+};
+
 /*****************************************************************************/
 static int
 process_enc_jpg(struct xrdp_encoder *self, XRDP_ENC_DATA *enc);
@@ -71,9 +78,13 @@ xrdp_encoder_create(struct xrdp_mm *mm)
 
     client_info = mm->wm->client_info;
 
+    /* RemoteFX 7.1 requires LAN but GFX does not */
     if (client_info->mcs_connection_type != CONNECTION_TYPE_LAN)
     {
-        return 0;
+        if ((mm->egfx_flags & 3) == 0)
+        {
+            return 0;
+        }
     }
     if (client_info->bpp < 24)
     {
@@ -87,10 +98,9 @@ xrdp_encoder_create(struct xrdp_mm *mm)
     }
     self->mm = mm;
 
-    if (client_info->gfx)
+    if (mm->egfx_flags & 1)
     {
         LLOGLN(0, ("xrdp_encoder_create: starting h264 codec session gfx"));
-        self->codec_id = client_info->h264_codec_id;
         self->in_codec_mode = 1;
         client_info->capture_code = 3;
         client_info->capture_format =
@@ -101,6 +111,23 @@ xrdp_encoder_create(struct xrdp_mm *mm)
 #ifdef XRDP_X264
         self->codec_handle = xrdp_encoder_x264_create();
 #endif
+    }
+    else if (mm->egfx_flags & 2)
+    {
+        LLOGLN(0, ("xrdp_encoder_create: starting gfx rfx pro codec session"));
+        self->in_codec_mode = 1;
+        client_info->capture_code = 2;
+        self->process_enc = process_enc_rfx;
+        self->gfx = 1;
+        self->quants = (const char *) g_rfx_quantization_values;
+        self->num_quants = 2;
+        self->quant_idx_y = 0;
+        self->quant_idx_u = 1;
+        self->quant_idx_v = 1;
+        self->codec_handle = rfxcodec_encode_create(mm->wm->screen->width,
+                                                    mm->wm->screen->height,
+                                                    RFX_FORMAT_YUV,
+                                                    RFX_FLAGS_RLGR1 | RFX_FLAGS_PRO1);
     }
     else if (client_info->jpeg_codec_id != 0)
     {
@@ -408,9 +435,9 @@ process_enc_rfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
                 tiles[index].y = y;
                 tiles[index].cx = cx;
                 tiles[index].cy = cy;
-                tiles[index].quant_y = 0;
-                tiles[index].quant_cb = 0;
-                tiles[index].quant_cr = 0;
+                tiles[index].quant_y = self->quant_idx_y;
+                tiles[index].quant_cb = self->quant_idx_u;
+                tiles[index].quant_cr = self->quant_idx_v;
             }
 
             count = enc->num_drects;
@@ -426,13 +453,17 @@ process_enc_rfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
                 rfxrects[index].cy = cy;
             }
 
+            LLOGLN(10, ("process_enc_rfx: num_crects %d num_drects %d",
+                   enc->num_crects, enc->num_drects));
+
             out_data_bytes = self->max_compressed_bytes;
             error = rfxcodec_encode(self->codec_handle,
                                     out_data + XRDP_SURCMD_PREFIX_BYTES,
                                     &out_data_bytes, enc->data,
                                     enc->width, enc->height, enc->width * 4,
                                     rfxrects, enc->num_drects,
-                                    tiles, enc->num_crects, 0, 0);
+                                    tiles, enc->num_crects,
+                                    self->quants, self->num_quants);
         }
     }
 
@@ -452,6 +483,10 @@ process_enc_rfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
     enc_done->last = 1;
     enc_done->cx = self->mm->wm->screen->width;
     enc_done->cy = self->mm->wm->screen->height;
+    if (self->gfx)
+    {
+        enc_done->flags = 2;
+    }
 
     /* done with msg */
     /* inform main thread done */

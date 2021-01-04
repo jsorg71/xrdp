@@ -301,6 +301,7 @@ struct xrdp_mm
   int xr2cr_cid_map[256];
   struct xrdp_egfx *egfx;
   int egfx_up;
+  int egfx_flags;
 };
 
 struct xrdp_key_info

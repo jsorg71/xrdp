@@ -29,6 +29,11 @@ struct xrdp_encoder
     int frames_in_flight;
     int gfx;
     int gfx_ack_off;
+    const char *quants;
+    int num_quants;
+    int quant_idx_y;
+    int quant_idx_u;
+    int quant_idx_v;
 };
 
 /* used when scheduling tasks in xrdp_encoder.c */

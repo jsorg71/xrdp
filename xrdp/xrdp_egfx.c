@@ -480,7 +480,7 @@ xrdp_egfx_send_wire_to_surface2(struct xrdp_egfx *egfx, int surface_id,
     char *hold_segment_count;
     char *bitmap_data8;
 
-    LLOGLN(0, ("xrdp_egfx_send_wire_to_surface2:"));
+    LLOGLN(10, ("xrdp_egfx_send_wire_to_surface2:"));
     make_stream(s);
     bytes = bitmap_data_length + 8192;
     bytes += 5 * (bitmap_data_length / 0xFFFF);
@@ -518,7 +518,7 @@ xrdp_egfx_send_wire_to_surface2(struct xrdp_egfx *egfx, int surface_id,
         /* RDP8_BULK_ENCODED_DATA */
         out_uint8(s, 0x04); /* header = PACKET_COMPR_TYPE_RDP8 */
         out_uint8a(s, bitmap_data8 + index, segment_size);
-        LLOGLN(0, ("  segment index %d segment_size %d",
+        LLOGLN(10, ("  segment index %d segment_size %d",
                segment_count, segment_size));
         index += segment_size;
         segment_count++;
@@ -529,7 +529,7 @@ xrdp_egfx_send_wire_to_surface2(struct xrdp_egfx *egfx, int surface_id,
     s->p = hold_segment_count;
     out_uint16_le(s, segment_count);
     error = xrdp_egfx_send_data(egfx, s->data, bytes);
-    LLOGLN(0, ("xrdp_egfx_send_wire_to_surface2: xrdp_egfx_send_data error %d "
+    LLOGLN(10, ("xrdp_egfx_send_wire_to_surface2: xrdp_egfx_send_data error %d "
            "segment_count %d", error, segment_count));
     free_stream(s);
     return error;

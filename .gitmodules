@@ -1,6 +1,6 @@
 [submodule "librfxcodec"]
 	path = librfxcodec
-	url = https://github.com/neutrinolabs/librfxcodec.git
+	url = https://github.com/jsorg71/librfxcodec.git
 	branch = .
 	ignore = untracked
 

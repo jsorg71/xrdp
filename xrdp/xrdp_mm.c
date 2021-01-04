@@ -73,7 +73,13 @@ xrdp_mm_create(struct xrdp_wm *owner)
            self->wm->client_info->rfx_codec_id,
            self->wm->client_info->h264_codec_id));
 
-    self->encoder = xrdp_encoder_create(self);
+    if ((self->wm->client_info->gfx == 0) &&
+        ((self->wm->client_info->h264_codec_id != 0) ||
+         (self->wm->client_info->jpeg_codec_id != 0) ||
+         (self->wm->client_info->rfx_codec_id != 0)))
+    {
+        self->encoder = xrdp_encoder_create(self);
+    }
 
     return self;
 }
@@ -1132,6 +1138,8 @@ xrdp_mm_egfx_caps_advertise(void* user, int caps_count,
     struct xrdp_bitmap *screen;
     int index;
     int best_index;
+    int best_h264_index;
+    int best_pro_index;
     int error;
     int version;
     int flags;
@@ -1140,7 +1148,13 @@ xrdp_mm_egfx_caps_advertise(void* user, int caps_count,
     LLOGLN(0, ("xrdp_mm_egfx_caps_advertise:"));
     self = (struct xrdp_mm *) user;
     screen = self->wm->screen;
+    if (screen->data == NULL)
+    {
+        LLOGLN(0, ("xrdp_mm_egfx_caps_advertise: can not do gfx"));
+    }
     best_index = -1;
+    best_h264_index = -1;
+    best_pro_index = -1;
     for (index = 0; index < caps_count; index++)
     {
         version = versions[index];
@@ -1149,32 +1163,53 @@ xrdp_mm_egfx_caps_advertise(void* user, int caps_count,
         switch (version)
         {
             case XR_RDPGFX_CAPVERSION_8:
+                best_pro_index = index;
                 break;
             case XR_RDPGFX_CAPVERSION_81:
                 if (flags & XR_RDPGFX_CAPS_FLAG_AVC420_ENABLED)
                 {
-                    best_index = index;
+                    best_h264_index = index;
                 }
+                best_pro_index = index;
                 break;
             case XR_RDPGFX_CAPVERSION_10:
+                best_pro_index = index;
                 break;
             case XR_RDPGFX_CAPVERSION_101:
+                best_pro_index = index;
                 break;
             case XR_RDPGFX_CAPVERSION_102:
+                best_pro_index = index;
                 break;
             case XR_RDPGFX_CAPVERSION_103:
+                best_pro_index = index;
                 break;
             case XR_RDPGFX_CAPVERSION_104:
                 if (!(flags & XR_RDPGFX_CAPS_FLAG_AVC_DISABLED))
                 {
-                    best_index = index;
+                    best_h264_index = index;
                 }
+                best_pro_index = index;
                 break;
             case XR_RDPGFX_CAPVERSION_105:
+                best_pro_index = index;
                 break;
             case XR_RDPGFX_CAPVERSION_106:
+                best_pro_index = index;
                 break;
         }
+    }
+    if (best_pro_index >= 0)
+    {
+        best_index = best_pro_index;
+        self->egfx_flags = 2;
+    }
+    if (best_h264_index >= 0) /* prefer h264, todo use setting in xrdp.ini for this */
+    {
+#ifdef XRDP_X264
+        best_index = best_h264_index;
+        self->egfx_flags = 1;
+#endif
     }
     if (best_index >= 0)
     {
@@ -1186,22 +1221,20 @@ xrdp_mm_egfx_caps_advertise(void* user, int caps_count,
         LLOGLN(0, ("xrdp_mm_egfx_caps_advertise: xrdp_egfx_send_capsconfirm "
                "error %d", error));
         self->egfx_up = 1;
-        if (screen->data != NULL)
+        xrdp_egfx_send_create_surface(self->egfx, 1,
+                                      screen->width, screen->height,
+                                      XR_PIXEL_FORMAT_XRGB_8888);
+        xrdp_egfx_send_map_surface(self->egfx, 1, 0, 0);
+        xr_rect.left = 0;
+        xr_rect.top = 0;
+        xr_rect.right = screen->width;
+        xr_rect.bottom = screen->height;
+        if (self->wm->screen_dirty_region == NULL)
         {
-            xrdp_egfx_send_create_surface(self->egfx, 1,
-                                          screen->width, screen->height,
-                                          XR_PIXEL_FORMAT_XRGB_8888);
-            xrdp_egfx_send_map_surface(self->egfx, 1, 0, 0);
-            xr_rect.left = 0;
-            xr_rect.top = 0;
-            xr_rect.right = screen->width;
-            xr_rect.bottom = screen->height;
-            if (self->wm->screen_dirty_region == NULL)
-            {
-                self->wm->screen_dirty_region = xrdp_region_create(self->wm);
-            }
-            xrdp_region_add_rect(self->wm->screen_dirty_region, &xr_rect);
+            self->wm->screen_dirty_region = xrdp_region_create(self->wm);
         }
+        xrdp_region_add_rect(self->wm->screen_dirty_region, &xr_rect);
+        self->encoder = xrdp_encoder_create(self);
     }
     else
     {
@@ -1234,6 +1267,11 @@ xrdp_mm_egfx_frame_ack(void* user, int queue_depth, int frame_id,
     LLOGLN(10, ("xrdp_mm_egfx_frame_ack:"));
     self = (struct xrdp_mm *) user;
     encoder = self->encoder;
+    if (encoder == NULL)
+    {
+        LLOGLN(0, ("xrdp_mm_egfx_frame_ack: encoder is nil"));
+        return 0;
+    }
     if (queue_depth == XR_SUSPEND_FRAME_ACKNOWLEDGEMENT)
     {
         LLOGLN(0, ("xrdp_mm_egfx_frame_ack: queue_depth %d frame_id %d "
@@ -2864,7 +2902,7 @@ xrdp_mm_process_enc_done(struct xrdp_mm *self)
                    "frame_id %d use_frame_acks %d", x, y, cx, cy,
                    enc_done->enc->frame_id,
                    self->wm->client_info->use_frame_acks));
-            if (enc_done->flags & 1) /* gfx */
+            if (enc_done->flags & 1) /* gfx h264 */
             {
                 xrdp_egfx_send_frame_start(self->egfx,
                                            enc_done->enc->frame_id, 0);
@@ -2876,6 +2914,17 @@ xrdp_mm_process_enc_done(struct xrdp_mm *self)
                                                 XR_RDPGFX_CODECID_AVC420,
                                                 XR_PIXEL_FORMAT_XRGB_8888,
                                                 &rect,
+                                                enc_done->comp_pad_data +
+                                                    enc_done->pad_bytes,
+                                                enc_done->comp_bytes);
+                xrdp_egfx_send_frame_end(self->egfx, enc_done->enc->frame_id);
+            }
+            else if (enc_done->flags & 2) /* gfx progressive rfx */
+            {
+                xrdp_egfx_send_frame_start(self->egfx,
+                                           enc_done->enc->frame_id, 0);
+                xrdp_egfx_send_wire_to_surface2(self->egfx, 1, 9, 1,
+                                                XR_PIXEL_FORMAT_XRGB_8888,
                                                 enc_done->comp_pad_data +
                                                     enc_done->pad_bytes,
                                                 enc_done->comp_bytes);
@@ -2900,7 +2949,7 @@ xrdp_mm_process_enc_done(struct xrdp_mm *self)
         if (enc_done->last)
         {
             LLOGLN(10, ("xrdp_mm_process_enc_done: last set"));
-            if (enc_done->flags & 1) /* gfx */
+            if (enc_done->flags & 3) /* gfx */
             {
                 if (self->encoder->gfx_ack_off)
                 {
