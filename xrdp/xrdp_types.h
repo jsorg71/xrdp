@@ -302,6 +302,7 @@ struct xrdp_mm
   struct xrdp_egfx *egfx;
   int egfx_up;
   int egfx_flags;
+  int gfx_delay_autologin;
 };
 
 struct xrdp_key_info

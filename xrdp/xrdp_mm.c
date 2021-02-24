@@ -1235,6 +1235,11 @@ xrdp_mm_egfx_caps_advertise(void* user, int caps_count,
         }
         xrdp_region_add_rect(self->wm->screen_dirty_region, &xr_rect);
         self->encoder = xrdp_encoder_create(self);
+        if (self->gfx_delay_autologin)
+        {
+            self->gfx_delay_autologin = 0;
+            xrdp_wm_set_login_mode(self->wm, 2);
+        }
     }
     else
     {
@@ -3393,6 +3398,13 @@ server_paint_rects(struct xrdp_mod* mod, int num_drects, short *drects,
         /* signal xrdp_encoder thread */
         g_set_wait_obj(mm->encoder->xrdp_encoder_event_to_proc);
 
+        return 0;
+    }
+
+    if (wm->client_info->gfx)
+    {
+        LLOGLN(0, ("server_paint_rects: gfx session and no encoder"));
+        mm->mod->mod_frame_ack(mm->mod, flags, frame_id);
         return 0;
     }
 

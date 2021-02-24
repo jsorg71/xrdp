@@ -773,8 +773,16 @@ xrdp_wm_init(struct xrdp_wm *self)
                     list_add_item(self->mm->login_names, (long)g_strdup(q));
                     list_add_item(self->mm->login_values, (long)g_strdup(r));
                 }
-
-                xrdp_wm_set_login_mode(self, 2);
+                if (self->session->client_info->gfx && !self->mm->egfx_up)
+                {
+                    /* gfx session but have not recieved caps advertise yet,
+                       set flag so we will connect to backend later */
+                    self->mm->gfx_delay_autologin = 1;
+                }
+                else
+                {
+                    xrdp_wm_set_login_mode(self, 2);
+                }
             }
             else
             {

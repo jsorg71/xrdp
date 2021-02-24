@@ -78,12 +78,23 @@ int
 xrdp_encoder_x264_delete(void *handle)
 {
     struct x264_global *xg;
+    struct x264_encoder *xe;
+    int index;
 
     if (handle == 0)
     {
         return 0;
     }
     xg = (struct x264_global *) handle;
+    for (index = 0; index < 16; index++)
+    {
+        xe = &(xg->encoders[index]);
+        if (xe->x264_enc_han != 0)
+        {
+            x264_encoder_close(xe->x264_enc_han);
+        }
+        g_free(xe->yuvdata);
+    }
     g_free(xg);
     return 0;
 }

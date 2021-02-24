@@ -238,7 +238,12 @@ xrdp_encoder_delete(struct xrdp_encoder *self)
         rfxcodec_encode_destroy(self->codec_handle);
     }
 #endif
-
+#ifdef XRDP_X264
+    else if (self->process_enc == process_enc_h264)
+    {
+        xrdp_encoder_x264_delete(self->codec_handle);
+    }
+#endif
     /* destroy wait objects used for signalling */
     g_delete_wait_obj(self->xrdp_encoder_event_to_proc);
     g_delete_wait_obj(self->xrdp_encoder_event_processed);
