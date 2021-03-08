@@ -536,6 +536,56 @@ xrdp_egfx_send_wire_to_surface2(struct xrdp_egfx *egfx, int surface_id,
 }
 
 /******************************************************************************/
+int
+xrdp_egfx_send_reset_graphics(struct xrdp_egfx *egfx, int width, int height,
+                              int monitor_count, struct monitor_info *mi)
+{
+    int error;
+    int bytes;
+    int index;
+    struct stream *s;
+
+    LLOGLN(0, ("xrdp_egfx_send_reset_graphics:"));
+    if (monitor_count > 16)
+    {
+        return 1;
+    }
+    make_stream(s);
+    init_stream(s, 8192);
+    /* RDP_SEGMENTED_DATA */
+    out_uint8(s, 0xE0); /* descriptor = SINGLE */
+    /* RDP8_BULK_ENCODED_DATA */
+    out_uint8(s, 0x04); /* header = PACKET_COMPR_TYPE_RDP8 */
+    /* RDPGFX_HEADER */
+    out_uint16_le(s, XR_RDPGFX_CMDID_RESETGRAPHICS); /* cmdId */
+    out_uint16_le(s, 0); /* flags = 0 */
+    out_uint32_le(s, 340);
+    out_uint32_le(s, width);
+    out_uint32_le(s, height);
+    out_uint32_le(s, monitor_count);
+    for (index = 0; index < monitor_count; index++)
+    {
+        out_uint32_le(s, mi[index].left);
+        out_uint32_le(s, mi[index].top);
+        out_uint32_le(s, mi[index].right);
+        out_uint32_le(s, mi[index].bottom);
+        out_uint32_le(s, mi[index].is_primary);
+    }
+    if (monitor_count < 16)
+    {
+        bytes = 340 - (20 + (monitor_count * 20));
+        out_uint8s(s, bytes);
+    }
+    s_mark_end(s);
+    bytes = (int) (s->end - s->data);
+    error = xrdp_egfx_send_data(egfx, s->data, bytes);
+    LLOGLN(0, ("xrdp_egfx_send_reset_graphics: xrdp_egfx_send_data error %d",
+           error));
+    free_stream(s);
+    return error;
+}
+
+/******************************************************************************/
 /* RDPGFX_CMDID_FRAMEACKNOWLEDGE */
 static int
 xrdp_egfx_process_frame_ack(struct xrdp_egfx *egfx, struct stream *s)

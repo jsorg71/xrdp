@@ -1220,6 +1220,13 @@ xrdp_mm_egfx_caps_advertise(void* user, int caps_count,
                                            flagss[best_index]);
         LLOGLN(0, ("xrdp_mm_egfx_caps_advertise: xrdp_egfx_send_capsconfirm "
                "error %d", error));
+        error = xrdp_egfx_send_reset_graphics(self->egfx,
+                                              screen->width, screen->height,
+                                              self->wm->client_info->monitorCount,
+                                              self->wm->client_info->minfo_wm);
+        LLOGLN(0, ("xrdp_mm_egfx_caps_advertise: xrdp_egfx_send_reset_graphics "
+                   "error %d monitorCount %d",
+                   error, self->wm->client_info->monitorCount));
         self->egfx_up = 1;
         xrdp_egfx_send_create_surface(self->egfx, 1,
                                       screen->width, screen->height,
