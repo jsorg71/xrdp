@@ -562,14 +562,26 @@ xrdp_egfx_send_reset_graphics(struct xrdp_egfx *egfx, int width, int height,
     out_uint32_le(s, 340);
     out_uint32_le(s, width);
     out_uint32_le(s, height);
-    out_uint32_le(s, monitor_count);
-    for (index = 0; index < monitor_count; index++)
+    out_uint32_le(s, monitor_count == 0 ? 1 : monitor_count);
+    if (monitor_count == 0)
     {
-        out_uint32_le(s, mi[index].left);
-        out_uint32_le(s, mi[index].top);
-        out_uint32_le(s, mi[index].right);
-        out_uint32_le(s, mi[index].bottom);
-        out_uint32_le(s, mi[index].is_primary);
+        out_uint32_le(s, 0);
+        out_uint32_le(s, 0);
+        out_uint32_le(s, width);
+        out_uint32_le(s, height);
+        out_uint32_le(s, 1);
+        monitor_count = 1;
+    }
+    else
+    {
+        for (index = 0; index < monitor_count; ++index)
+        {
+            out_uint32_le(s, mi[index].left);
+            out_uint32_le(s, mi[index].top);
+            out_uint32_le(s, mi[index].right);
+            out_uint32_le(s, mi[index].bottom);
+            out_uint32_le(s, mi[index].is_primary);
+        }
     }
     if (monitor_count < 16)
     {
