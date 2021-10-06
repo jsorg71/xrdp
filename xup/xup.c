@@ -1244,41 +1244,38 @@ process_server_paint_rect_shmem_ex(struct mod *amod, struct stream *s)
     in_uint16_le(s, height);
 
     bmpdata = 0;
-    if (flags == 0) /* screen */
+    if (amod->screen_shmem_id_mapped == 0)
     {
-        if (amod->screen_shmem_id_mapped == 0)
+        amod->screen_shmem_id = shmem_id;
+        amod->screen_shmem_pixels = (char *) g_shmat(amod->screen_shmem_id);
+        if (amod->screen_shmem_pixels == (void*)-1)
         {
-            amod->screen_shmem_id = shmem_id;
-            amod->screen_shmem_pixels = (char *) g_shmat(amod->screen_shmem_id);
-            if (amod->screen_shmem_pixels == (void*)-1)
-            {
-                /* failed */
-                amod->screen_shmem_id = 0;
-                amod->screen_shmem_pixels = 0;
-                amod->screen_shmem_id_mapped = 0;
-            }
-            else
-            {
-                amod->screen_shmem_id_mapped = 1;
-            }
+            /* failed */
+            amod->screen_shmem_id = 0;
+            amod->screen_shmem_pixels = 0;
+            amod->screen_shmem_id_mapped = 0;
         }
-        else if (amod->screen_shmem_id != shmem_id)
+        else
         {
-            amod->screen_shmem_id = shmem_id;
-            g_shmdt(amod->screen_shmem_pixels);
-            amod->screen_shmem_pixels = (char *) g_shmat(amod->screen_shmem_id);
-            if (amod->screen_shmem_pixels == (void*)-1)
-            {
-                /* failed */
-                amod->screen_shmem_id = 0;
-                amod->screen_shmem_pixels = 0;
-                amod->screen_shmem_id_mapped = 0;
-            }
+            amod->screen_shmem_id_mapped = 1;
         }
-        if (amod->screen_shmem_pixels != 0)
+    }
+    else if (amod->screen_shmem_id != shmem_id)
+    {
+        amod->screen_shmem_id = shmem_id;
+        g_shmdt(amod->screen_shmem_pixels);
+        amod->screen_shmem_pixels = (char *) g_shmat(amod->screen_shmem_id);
+        if (amod->screen_shmem_pixels == (void*)-1)
         {
-            bmpdata = amod->screen_shmem_pixels + shmem_offset;
+            /* failed */
+            amod->screen_shmem_id = 0;
+            amod->screen_shmem_pixels = 0;
+            amod->screen_shmem_id_mapped = 0;
         }
+    }
+    if (amod->screen_shmem_pixels != 0)
+    {
+        bmpdata = amod->screen_shmem_pixels + shmem_offset;
     }
     if (bmpdata != 0)
     {

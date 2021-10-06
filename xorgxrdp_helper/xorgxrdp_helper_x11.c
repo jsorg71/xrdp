@@ -1152,6 +1152,7 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     if (mi->tex_format == XH_YUV420)
     {
+        LOGLN((LOG_LEVEL_INFO, LOGS "using XH_YUV420", LOGP));
         glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height * 3 / 2, 0,
                      GL_RED, GL_UNSIGNED_BYTE, NULL);
         mi->get_vertices = get_vertices420;
@@ -1162,6 +1163,7 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
     }
     else
     {
+        LOGLN((LOG_LEVEL_INFO, LOGS "using XH_YUV444", LOGP));
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
                      GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, NULL);
         mi->get_vertices = get_vertices444;
@@ -1212,6 +1214,9 @@ xorgxrdp_helper_x11_encode_pixmap(int width, int height, int mon_id,
     mi = g_mons + (mon_id & 0xF);
     if ((width != mi->width) || (height != mi->height))
     {
+        LOGLN((LOG_LEVEL_ERROR, LOGS "error width %d should be %d "
+               "height %d should be %d", LOGP,
+               width, mi->width, height, mi->height));
         return 1;
     }
     /* rgb to yuv */
@@ -1229,6 +1234,8 @@ xorgxrdp_helper_x11_encode_pixmap(int width, int height, int mon_id,
                                 num_crects, crects, width, height);
     if (vertices == NULL)
     {
+        LOGLN((LOG_LEVEL_ERROR, LOGS "error get_vertices failed num_crects %d",
+               LOGP, num_crects));
         return 1;
     }
     glGenVertexArrays(1, &vao);

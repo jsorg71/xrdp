@@ -1206,7 +1206,7 @@ xrdp_mm_egfx_caps_advertise(void* user, int caps_count,
     }
     if (best_h264_index >= 0) /* prefer h264, todo use setting in xrdp.ini for this */
     {
-#if defined(XRDP_X264) || defined(XRDP_NVENC)
+#if defined(XRDP_X264)
         best_index = best_h264_index;
         self->egfx_flags = 1;
 #endif

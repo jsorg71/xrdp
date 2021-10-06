@@ -327,10 +327,26 @@ xorgxrdp_helper_nvenc_encode(struct enc_info *ei, int tex,
                 *cdata_bytes = lockBitstream.bitstreamSizeInBytes;
                 rv = 0;
             }
+            else
+            {
+                LOGLN((LOG_LEVEL_ERROR, LOGS "error not enough room %d %d",
+                       LOGP, *cdata_bytes,
+                       (int) (lockBitstream.bitstreamSizeInBytes)));
+            }
             g_enc_funcs.nvEncUnlockBitstream(ei->enc,
                                              lockBitstream.outputBitstream);
         }
+        else
+        {
+            LOGLN((LOG_LEVEL_ERROR, LOGS "error nvEncLockBitstream %d",
+                   LOGP, nv_error));
+        }
         ei->frameCount++;
+    }
+    else
+    {
+        LOGLN((LOG_LEVEL_ERROR, LOGS "error nvEncEncodePicture %d",
+               LOGP, nv_error));
     }
     return rv;
 }

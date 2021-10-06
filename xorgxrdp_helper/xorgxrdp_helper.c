@@ -69,48 +69,44 @@ xorg_process_message_61(struct xorgxrdp_info *xi, struct stream *s)
     in_uint8s(s, 4); /* frame_id */
     in_uint32_le(s, shmem_id);
     in_uint32_le(s, shmem_offset);
-
     in_uint16_le(s, width);
     in_uint16_le(s, height);
-
+    LOGLND((LOG_LEVEL_INFO, LOGS "flags %8.8x", LOGP, flags));
     bmpdata = NULL;
-    if (flags == 0) /* screen */
+    if (g_shmem_id_mapped == 0)
     {
-        if (g_shmem_id_mapped == 0)
+        g_shmem_id = shmem_id;
+        g_shmem_pixels = (char *) g_shmat(g_shmem_id);
+        if (g_shmem_pixels == (void*)-1)
         {
-            g_shmem_id = shmem_id;
-            g_shmem_pixels = (char *) g_shmat(g_shmem_id);
-            if (g_shmem_pixels == (void*)-1)
-            {
-                /* failed */
-                g_shmem_id = 0;
-                g_shmem_pixels = NULL;
-                g_shmem_id_mapped = 0;
-            }
-            else
-            {
-                g_shmem_id_mapped = 1;
-            }
+            /* failed */
+            g_shmem_id = 0;
+            g_shmem_pixels = NULL;
+            g_shmem_id_mapped = 0;
         }
-        else if (g_shmem_id != shmem_id)
+        else
         {
-            g_shmem_id = shmem_id;
-            g_shmdt(g_shmem_pixels);
-            g_shmem_pixels = (char *) g_shmat(g_shmem_id);
-            if (g_shmem_pixels == (void*)-1)
-            {
-                /* failed */
-                g_shmem_id = 0;
-                g_shmem_pixels = NULL;
-                g_shmem_id_mapped = 0;
-            }
-        }
-        if (g_shmem_pixels != NULL)
-        {
-            bmpdata = g_shmem_pixels + shmem_offset;
+            g_shmem_id_mapped = 1;
         }
     }
-    if (bmpdata != NULL)
+    else if (g_shmem_id != shmem_id)
+    {
+        g_shmem_id = shmem_id;
+        g_shmdt(g_shmem_pixels);
+        g_shmem_pixels = (char *) g_shmat(g_shmem_id);
+        if (g_shmem_pixels == (void*)-1)
+        {
+            /* failed */
+            g_shmem_id = 0;
+            g_shmem_pixels = NULL;
+            g_shmem_id_mapped = 0;
+        }
+    }
+    if (g_shmem_pixels != NULL)
+    {
+        bmpdata = g_shmem_pixels + shmem_offset;
+    }
+    if ((bmpdata != NULL) && (flags & 1))
     {
         cdata_bytes = 16 * 1024 * 1024;
         error = xorgxrdp_helper_x11_encode_pixmap(width, height, 0,
@@ -120,7 +116,11 @@ xorg_process_message_61(struct xorgxrdp_info *xi, struct stream *s)
         {
             LOGLN((LOG_LEVEL_ERROR, LOGS "error %d", LOGP, error));
         }
-        ((int *) bmpdata)[0] = cdata_bytes;
+        bmpdata[0] = cdata_bytes;
+        bmpdata[1] = cdata_bytes >> 8;
+        bmpdata[2] = cdata_bytes >> 16;
+        bmpdata[3] = cdata_bytes >> 24;
+        LOGLND((LOG_LEVEL_INFO, LOGS "cdata_bytes %d", LOGP, cdata_bytes));
     }
     g_free(crects);
     return 0;
