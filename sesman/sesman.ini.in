@@ -113,3 +113,4 @@ FileUmask=077
 
 [SessionVariables]
 PULSE_SCRIPT=@sesmansysconfdir@/pulse/default.pa
+XRDP_USE_HELPER=1

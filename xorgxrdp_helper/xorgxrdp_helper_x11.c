@@ -506,7 +506,8 @@ void main(void)\n\
     {\n\
         pix = texture2D(tex, vec2(x, y) / tex_size);\n\
         pix = vec4(pix.rgb, 1.0);\n\
-        gl_FragColor = clamp(dot(ymath, pix), 0.0, 1.0);\n\
+        pix = vec4(clamp(dot(ymath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+        gl_FragColor = pix;\n\
     }\n\
     else\n\
     {\n\
@@ -519,7 +520,8 @@ void main(void)\n\
             pix += texture2D(tex, vec2(x + 1.0, y + 1.0) / tex_size);\n\
             pix /= 4.0;\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(umath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(umath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
         else\n\
         {\n\
@@ -529,7 +531,8 @@ void main(void)\n\
             pix += texture2D(tex, vec2(x - 1.0, y + 1.0) / tex_size);\n\
             pix /= 4.0;\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(vmath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(vmath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
     }\n\
 }\n";
@@ -599,7 +602,8 @@ void main(void)\n\
     {\n\
         pix = texture2D(tex, vec2(x, y) / tex_size);\n\
         pix = vec4(pix.rgb, 1.0);\n\
-        gl_FragColor = clamp(dot(ymath, pix), 0.0, 1.0);\n\
+        pix = vec4(clamp(dot(ymath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+        gl_FragColor = pix;\n\
     }\n\
     else\n\
     {\n\
@@ -608,13 +612,15 @@ void main(void)\n\
         {\n\
             pix = texture2D(tex, vec2(x, y) / tex_size);\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(umath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(umath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
         else\n\
         {\n\
             pix = texture2D(tex, vec2(x - 1.0, y) / tex_size);\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(vmath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(vmath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
     }\n\
 }\n";
@@ -662,7 +668,8 @@ void main(void)\n\
             y = floor(y) * 2.0 + 1.5;\n\
             pix = texture2D(tex, vec2(x, y) / tex_size);\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(umath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(umath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
         else\n\
         {\n\
@@ -670,7 +677,8 @@ void main(void)\n\
             y = floor(y) * 2.0 + 1.5;\n\
             pix = texture2D(tex, vec2(x, y) / tex_size);\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(vmath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(vmath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
     }\n\
     else\n\
@@ -680,13 +688,15 @@ void main(void)\n\
         {\n\
             pix = texture2D(tex, vec2(x + 1.0, y) / tex_size);\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(umath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(umath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
         else\n\
         {\n\
             pix = texture2D(tex, vec2(x, y) / tex_size);\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(vmath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(vmath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
     }\n\
 }\n";
@@ -727,14 +737,16 @@ void main(void)\n\
             x = floor(x) * 2.0 + 1.5;\n\
             pix = texture2D(tex, vec2(x, y) / tex_size);\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(umath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(umath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
         else\n\
         {\n\
             x = floor(x - x1) * 2.0 + 1.5;\n\
             pix = texture2D(tex, vec2(x, y) / tex_size);\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(vmath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(vmath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
     }\n\
     else\n\
@@ -745,14 +757,16 @@ void main(void)\n\
             x = floor(x) * 2.0 + 0.5;\n\
             pix = texture2D(tex, vec2(x, y) / tex_size);\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(umath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(umath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
         else\n\
         {\n\
             x = floor(x - x1) * 2.0 + 0.5;\n\
             pix = texture2D(tex, vec2(x, y) / tex_size);\n\
             pix = vec4(pix.rgb, 1.0);\n\
-            gl_FragColor = clamp(dot(vmath, pix), 0.0, 1.0);\n\
+            pix = vec4(clamp(dot(vmath, pix), 0.0, 1.0), 0.0, 0.0, 1.0);\n\
+            gl_FragColor = pix;\n\
         }\n\
     }\n\
 }\n";
@@ -833,6 +847,7 @@ xorgxrdp_helper_x11_init(void)
 
     for (index = 0; index < XH_NUM_SHADERS; index++)
     {
+        LOGLN((LOG_LEVEL_INFO, LOGS "shader program %d", LOGP, index));
         g_si[index].vertex_shader = glCreateShader(GL_VERTEX_SHADER);
         g_si[index].fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
         vlength = g_strlen(vsource[index]);
@@ -844,19 +859,19 @@ xorgxrdp_helper_x11_init(void)
         glCompileShader(g_si[index].vertex_shader);
         glGetShaderiv(g_si[index].vertex_shader, GL_COMPILE_STATUS,
                       &compiled);
-        LOGLN((LOG_LEVEL_INFO, LOGS "vertex_shader compiled %d",
+        LOGLN((LOG_LEVEL_INFO, LOGS "  vertex_shader compiled %d",
                LOGP, compiled);
         glCompileShader(g_si[index].fragment_shader));
         glGetShaderiv(g_si[index].fragment_shader, GL_COMPILE_STATUS,
                       &compiled);
-        LOGLN((LOG_LEVEL_INFO, LOGS "fragment_shader compiled %d",
+        LOGLN((LOG_LEVEL_INFO, LOGS "  fragment_shader compiled %d",
                LOGP, compiled));
         g_si[index].program = glCreateProgram();
         glAttachShader(g_si[index].program, g_si[index].vertex_shader);
         glAttachShader(g_si[index].program, g_si[index].fragment_shader);
         glLinkProgram(g_si[index].program);
         glGetProgramiv(g_si[index].program, GL_LINK_STATUS, &linked);
-        LOGLN((LOG_LEVEL_INFO, LOGS "linked %d", LOGP, linked));
+        LOGLN((LOG_LEVEL_INFO, LOGS "  linked %d", LOGP, linked));
         g_si[index].tex_loc =
             glGetUniformLocation(g_si[index].program, "tex");
         g_si[index].tex_size_loc =
@@ -867,7 +882,7 @@ xorgxrdp_helper_x11_init(void)
             glGetUniformLocation(g_si[index].program, "umath");
         g_si[index].vmath_loc =
             glGetUniformLocation(g_si[index].program, "vmath");
-        LOGLN((LOG_LEVEL_INFO, LOGS "tex_loc %d "
+        LOGLN((LOG_LEVEL_INFO, LOGS "  tex_loc %d "
                "tex_size_loc %d ymath_loc %d umath_loc %d vmath_loc %d",
                LOGP, g_si[index].tex_loc, g_si[index].tex_size_loc,
                g_si[index].ymath_loc, g_si[index].umath_loc,

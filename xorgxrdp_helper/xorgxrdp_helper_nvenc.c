@@ -63,6 +63,15 @@ xorgxrdp_helper_nvenc_init(void)
                    LOGP, g_lib_name, g_lib_name1));
             return 1;
         }
+        else
+        {
+            LOGLN((LOG_LEVEL_INFO, LOGS "loaded library %s", LOGP,
+                   g_lib_name1));
+        }
+    }
+    else
+    {
+        LOGLN((LOG_LEVEL_INFO, LOGS "loaded library %s", LOGP, g_lib_name));
     }
     g_NvEncodeAPICreateInstance = g_get_proc_address(g_lib, g_func_name);
     if (g_NvEncodeAPICreateInstance == NULL)
