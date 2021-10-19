@@ -15,6 +15,13 @@ XRDP_EXTRA_LIBS += $(XRDP_NVENC_LIBS)
 XRDP_EXTRA_SOURCES += xorgxrdp_helper_nvenc.c xorgxrdp_helper_nvenc.h
 endif
 
+if XRDP_YAMI
+AM_CPPFLAGS += -DXRDP_YAMI
+AM_CPPFLAGS += $(XRDP_YAMI_CFLAGS)
+XRDP_EXTRA_LIBS += $(XRDP_YAMI_LIBS)
+XRDP_EXTRA_SOURCES += xorgxrdp_helper_yami.c xorgxrdp_helper_yami.h
+endif
+
 bin_PROGRAMS = \
   xorgxrdp_helper
 

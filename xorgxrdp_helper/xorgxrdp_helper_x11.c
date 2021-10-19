@@ -34,6 +34,7 @@ static Visual *g_vis = NULL;
 static GC g_gc;
 
 //#undef XRDP_NVENC
+//#undef XRDP_YAMI
 
 #if defined(XRDP_NVENC)
 
@@ -68,6 +69,41 @@ xorgxrdp_helper_encoder_encode(struct enc_info *ei, int enc_texture,
                                void *cdata, int *cdata_bytes)
 {
     return xorgxrdp_helper_nvenc_encode(ei, enc_texture, cdata, cdata_bytes);
+}
+
+#elif defined(XRDP_YAMI)
+
+#include "xorgxrdp_helper_yami.h"
+
+/*****************************************************************************/
+static int
+xorgxrdp_helper_encoder_init(void)
+{
+    return xorgxrdp_helper_yami_init();
+}
+
+/*****************************************************************************/
+static int
+xorgxrdp_helper_encoder_delete_encoder(struct enc_info *ei)
+{
+    return xorgxrdp_helper_yami_delete_encoder(ei);
+}
+
+/*****************************************************************************/
+static int
+xorgxrdp_helper_encoder_create_encoder(int width, int height, int enc_texture,
+                                       int tex_format, struct enc_info **ei)
+{
+    return xorgxrdp_helper_yami_create_encoder(width, height, enc_texture,
+                                               tex_format, ei);
+}
+
+/*****************************************************************************/
+static int
+xorgxrdp_helper_encoder_encode(struct enc_info *ei, int enc_texture,
+                               void *cdata, int *cdata_bytes)
+{
+    return xorgxrdp_helper_yami_encode(ei, enc_texture, cdata, cdata_bytes);
 }
 
 #else
@@ -225,80 +261,80 @@ xorgxrdp_helper_inf_release_tex_image(inf_image_t inf_image)
 
 #include <epoxy/egl.h>
 
-static EGLDisplay g_egl_display;
-static EGLContext g_egl_context;
+EGLDisplay g_egl_display;
+EGLContext g_egl_context;
 static EGLSurface g_egl_surface;
 static EGLConfig g_ecfg;
 static EGLint g_num_config;
 
 static EGLint g_choose_config_attr[] =
 {
-    EGL_COLOR_BUFFER_TYPE,     EGL_RGB_BUFFER,
-    EGL_BUFFER_SIZE,           32,
-    EGL_RED_SIZE,              8,
-    EGL_GREEN_SIZE,            8,
-    EGL_BLUE_SIZE,             8,
-    EGL_ALPHA_SIZE,            8,
-
-    EGL_DEPTH_SIZE,            24,
-    EGL_STENCIL_SIZE,          8,
-
-    EGL_SAMPLE_BUFFERS,        0,
-    EGL_SAMPLES,               0,
-
-    EGL_SURFACE_TYPE,          EGL_WINDOW_BIT | EGL_PIXMAP_BIT,
-    EGL_RENDERABLE_TYPE,       EGL_OPENGL_BIT,
-
-    //EGL_BIND_TO_TEXTURE_RGB,   EGL_TRUE,
-    //EGL_Y_INVERTED_NOK, EGL_TRUE,
-
-    EGL_NONE,
-
-    //EGL_RED_SIZE,        8,
-    //EGL_GREEN_SIZE,      8,
-    //EGL_BLUE_SIZE,       8,
-    //EGL_SURFACE_TYPE,    EGL_WINDOW_BIT,
-    //EGL_RENDERABLE_TYPE, 0,
-    //EGL_BIND_TO_TEXTURE_RGB, EGL_TRUE,
-    //EGL_NONE
-    //EGL_RED_SIZE,           8,
-    //EGL_GREEN_SIZE,         8,
-    //EGL_BLUE_SIZE,          8,
-    //EGL_ALPHA_SIZE,         0,
-    //EGL_RENDERABLE_TYPE,    EGL_OPENGL_ES2_BIT,
-    //EGL_CONFIG_CAVEAT,      EGL_NONE,
-    //EGL_MATCH_NATIVE_PIXMAP, 1,
-    //EGL_BIND_TO_TEXTURE_RGBA, EGL_TRUE,
-    //EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PIXMAP_BIT,
-    //EGL_NONE
+    EGL_RED_SIZE, 8,
+    EGL_GREEN_SIZE, 8,
+    EGL_BLUE_SIZE, 8,
+    EGL_NONE
 };
+
 static EGLint g_create_context_attr[] =
 {
-    EGL_CONTEXT_CLIENT_VERSION, 2,
+    EGL_CONTEXT_MAJOR_VERSION, 3,
+    EGL_CONTEXT_MINOR_VERSION, 3,
     EGL_NONE
 };
 
 static const EGLint g_create_surface_attr[] =
-{
-    //EGL_Y_INVERTED_NOK, EGL_TRUE,
-    EGL_BIND_TO_TEXTURE_RGBA, EGL_TRUE,
-    //EGL_TEXTURE_TARGET, EGL_TEXTURE_2D,
-    //EGL_TEXTURE_FORMAT, EGL_TEXTURE_RGBA,
-    //EGL_MIPMAP_TEXTURE, EGL_TRUE,
-    //EGL_TEXTURE_TARGET
+ {
+    EGL_TEXTURE_TARGET, EGL_TEXTURE_2D,
+    EGL_TEXTURE_FORMAT, EGL_TEXTURE_RGBA,
     EGL_NONE
 };
 
 typedef EGLSurface inf_image_t;
 
 /*****************************************************************************/
+static EGLBoolean
+xorgxrdp_helper_check_ext(const char *ext_name)
+{
+    const char *ext_str;
+
+    if (!epoxy_has_egl_extension(g_egl_display, ext_name))
+    {
+        ext_str = eglQueryString(g_egl_display, EGL_EXTENSIONS);
+        LOGLN((LOG_LEVEL_ERROR, LOGS "%s not present all list",
+               LOGP, ext_name));
+        LOGLN((LOG_LEVEL_ERROR, LOGS "%s", LOGP, ext_str));
+        return EGL_FALSE;
+    }
+    LOGLN((LOG_LEVEL_INFO, LOGS "%s present", LOGP, ext_name));
+    return EGL_TRUE;
+}
+
+/*****************************************************************************/
 static int
 xorgxrdp_helper_inf_init(void)
 {
+    int egl_ver;
     int ok;
 
+    ok = eglBindAPI(EGL_OPENGL_API);
+    LOGLN((LOG_LEVEL_INFO, LOGS "eglBindAPI ok %d", LOGP, ok));
     g_egl_display = eglGetDisplay((EGLNativeDisplayType) g_display);
+    LOGLN((LOG_LEVEL_INFO, LOGS "g_egl_display %p", LOGP, g_egl_display));
     eglInitialize(g_egl_display, NULL, NULL);
+    egl_ver = epoxy_egl_version(g_egl_display);
+    LOGLN((LOG_LEVEL_INFO, LOGS "egl_ver %d", LOGP, egl_ver));
+    if (egl_ver < 11) /* EGL version 1.1 */
+    {
+        LOGLN((LOG_LEVEL_ERROR, LOGS "egl_ver too old %d", LOGP, egl_ver));
+        return 1;
+    }
+    if ((!xorgxrdp_helper_check_ext("EGL_NOK_texture_from_pixmap")) ||
+        (!xorgxrdp_helper_check_ext("EGL_MESA_image_dma_buf_export")) ||
+        (!xorgxrdp_helper_check_ext("EGL_KHR_image_base")))
+    {
+        LOGLN((LOG_LEVEL_ERROR, LOGS "missing ext", LOGP));
+        return 1;
+    }
     eglChooseConfig(g_egl_display, g_choose_config_attr, &g_ecfg,
                     1, &g_num_config);
     LOGLN((LOG_LEVEL_INFO, LOGS "g_ecfg %p g_num_config %d",
@@ -306,14 +342,12 @@ xorgxrdp_helper_inf_init(void)
     g_egl_surface = eglCreateWindowSurface(g_egl_display, g_ecfg,
                                            g_root_window, NULL);
     LOGLN((LOG_LEVEL_INFO, LOGS "g_egl_surface %p", LOGP, g_egl_surface));
-    eglBindAPI(EGL_OPENGL_API);
     g_egl_context = eglCreateContext(g_egl_display, g_ecfg,
                                      EGL_NO_CONTEXT, g_create_context_attr);
     LOGLN((LOG_LEVEL_INFO, LOGS "g_egl_context %p", LOGP, g_egl_context));
     ok = eglMakeCurrent(g_egl_display, g_egl_surface, g_egl_surface,
                        g_egl_context);
-    LOGLN((LOG_LEVEL_INFO, LOGS "ok %d", LOGP, ok));
-
+    LOGLN((LOG_LEVEL_INFO, LOGS "eglMakeCurrent ok %d", LOGP, ok));
     return 0;
 }
 
@@ -415,12 +449,13 @@ static GLuint g_fb = 0;
 
 #define XH_SHADERCOPY           0
 #define XH_SHADERRGB2YUV420     1
-#define XH_SHADERRGB2YUV444     2
-#define XH_SHADERRGB2YUV420MV   3
-#define XH_SHADERRGB2YUV420AV   4
-#define XH_SHADERRGB2YUV420AVV2 5
+#define XH_SHADERRGB2YUV422     2
+#define XH_SHADERRGB2YUV444     3
+#define XH_SHADERRGB2YUV420MV   4
+#define XH_SHADERRGB2YUV420AV   5
+#define XH_SHADERRGB2YUV420AVV2 6
 
-#define XH_NUM_SHADERS 6
+#define XH_NUM_SHADERS 7
 
 struct shader_info
 {
@@ -535,6 +570,36 @@ void main(void)\n\
             gl_FragColor = pix;\n\
         }\n\
     }\n\
+}\n";
+static const GLchar g_fs_rgb_to_yuv422[] =
+"\
+uniform sampler2D tex;\n\
+uniform vec2 tex_size;\n\
+uniform vec4 ymath;\n\
+uniform vec4 umath;\n\
+uniform vec4 vmath;\n\
+void main(void)\n\
+{\n\
+    vec4 pix;\n\
+    vec4 pix1;\n\
+    vec4 pixs;\n\
+    float x;\n\
+    float y;\n\
+    x = gl_FragCoord.x;\n\
+    x = floor(x) * 2.0;\n\
+    y = gl_FragCoord.y;\n\
+    pix = texture2D(tex, vec2(x + 0.5, y) / tex_size);\n\
+    pix1 = texture2D(tex, vec2(x + 1.5, y) / tex_size);\n\
+    pixs = pix + pix1;\n\
+    pixs /= 2.0;\n\
+    pix.a = 1.0;\n\
+    pix1.a = 1.0;\n\
+    pixs.a = 1.0;\n\
+    pix.r = dot(ymath, pix);\n\
+    pix.g = dot(umath, pixs);\n\
+    pix.b = dot(ymath, pix1);\n\
+    pix.a = dot(vmath, pixs);\n\
+    gl_FragColor = clamp(pix, 0.0, 1.0);\n\
 }\n";
 static const GLchar g_fs_rgb_to_yuv444[] =
 "\
@@ -832,6 +897,9 @@ xorgxrdp_helper_x11_init(void)
     /* create rgb2yuv shader */
     vsource[XH_SHADERRGB2YUV420] = g_vs;
     fsource[XH_SHADERRGB2YUV420] = g_fs_rgb_to_yuv420;
+    /* create rgb2yuv shader */
+    vsource[XH_SHADERRGB2YUV422] = g_vs;
+    fsource[XH_SHADERRGB2YUV422] = g_fs_rgb_to_yuv422;
     /* create rgb2yuv shader */
     vsource[XH_SHADERRGB2YUV444] = g_vs;
     fsource[XH_SHADERRGB2YUV444] = g_fs_rgb_to_yuv444;
@@ -1132,6 +1200,7 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
 
     mi = g_mons + (mon_id & 0xF);
     mi->tex_format = XH_YUV420;
+    //mi->tex_format = XH_YUV422;
     //mi->tex_format = XH_YUV444;
     if (mi->pixmap != 0)
     {
@@ -1176,6 +1245,17 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
         mi->viewport.w = width;
         mi->viewport.h = height * 3 / 2;
     }
+    else if (mi->tex_format == XH_YUV422)
+    {
+        LOGLN((LOG_LEVEL_INFO, LOGS "using XH_YUV422", LOGP));
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width / 2, height, 0,
+                     GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, NULL);
+        mi->get_vertices = get_vertices444; /* same as 444 */
+        mi->viewport.x = 0;
+        mi->viewport.y = 0;
+        mi->viewport.w = width / 2;
+        mi->viewport.h = height;
+    }
     else
     {
         LOGLN((LOG_LEVEL_INFO, LOGS "using XH_YUV444", LOGP));
@@ -1198,6 +1278,8 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
                                                enc_texture, mi->tex_format,
                                                &(mi->ei)) != 0)
     {
+        LOGLN((LOG_LEVEL_ERROR, LOGS "xorgxrdp_helper_encoder_create_encoder "
+               "failed", LOGP));
         return 1;
     }
 
