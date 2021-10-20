@@ -6,8 +6,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
 
 #include <epoxy/gl.h>
 #include <epoxy/egl.h>
@@ -52,6 +50,7 @@ int
 xorgxrdp_helper_yami_init(void)
 {
     int error;
+    int version;
 
     LOGLN((LOG_LEVEL_INFO, LOGS, LOGP));
     g_lib = g_load_library(g_lib_name);
@@ -73,29 +72,40 @@ xorgxrdp_helper_yami_init(void)
         return 1;
     }
     g_memset(&g_enc_funcs, 0, sizeof(g_enc_funcs));
-    error = g_yami_get_funcs(&g_enc_funcs);
+    error = g_yami_get_funcs(&g_enc_funcs, YI_VERSION_INT(YI_MAJOR, YI_MINOR));
     LOGLN((LOG_LEVEL_INFO, LOGS "yami_get_funcs rv %d",
            LOGP, error));
     if (error != YI_SUCCESS)
     {
+        LOGLN((LOG_LEVEL_ERROR, LOGS "g_yami_get_funcs failed", LOGP));
         return 1;
     }
-
-    g_fd = open(g_drm_name, O_RDWR);
+    error = g_enc_funcs.yami_get_version(&version);
+    if (error != YI_SUCCESS)
+    {
+        LOGLN((LOG_LEVEL_ERROR, LOGS "yami_get_version failed", LOGP));
+        return 1;
+    }
+    if (version < YI_VERSION_INT(YI_MAJOR, YI_MINOR))
+    {
+        LOGLN((LOG_LEVEL_ERROR, LOGS "yami version too old 0x%8.8x",
+               LOGP, version));
+        return 1;
+    }
+    LOGLN((LOG_LEVEL_INFO, LOGS "yami version 0x%8.8x ok", LOGP, version));
+    g_fd = g_file_open_ex(g_drm_name, 1, 1, 0, 0);
     if (g_fd == -1)
     {
         LOGLN((LOG_LEVEL_ERROR, LOGS "open %s failed", LOGP, g_drm_name));
         return 1;
     }
     LOGLN((LOG_LEVEL_INFO, LOGS "open %s ok, fd %d", LOGP, g_drm_name, g_fd));
-
-    error = g_enc_funcs.yami_init(YI_TYPE_DRM, (void *) (intptr_t) g_fd);
+    error = g_enc_funcs.yami_init(YI_TYPE_DRM, (void *) (size_t) g_fd);
     if (error != 0)
     {
         LOGLN((LOG_LEVEL_ERROR, LOGS "yami_init failed", LOGP));
         return 1;
     }
-
     return 0;
 }
 
@@ -108,13 +118,11 @@ xorgxrdp_helper_yami_create_encoder(int width, int height, int tex,
     struct enc_info *lei;
 
     LOGLN((LOG_LEVEL_INFO, LOGS, LOGP));
-
     lei = g_new0(struct enc_info, 1);
     if (lei == NULL)
     {
         return 1;
     }
-
     error = g_enc_funcs.yami_encoder_create(&(lei->enc), width, height,
                                             YI_TYPE_H264,
                                             YI_H264_ENC_FLAGS_PROFILE_MAIN);
@@ -126,12 +134,9 @@ xorgxrdp_helper_yami_create_encoder(int width, int height, int tex,
         return 1;
     }
     LOGLN((LOG_LEVEL_INFO, LOGS "yami_encoder_create ok", LOGP));
-
     lei->width = width;
     lei->height = height;
-
     *ei = lei;
-
     return 0;
 }
 
@@ -168,7 +173,7 @@ xorgxrdp_helper_yami_encode(struct enc_info *ei, int tex,
     LOGLND((LOG_LEVEL_INFO, LOGS "tex %d", LOGP, tex));
     LOGLND((LOG_LEVEL_INFO, LOGS "g_egl_display %p", LOGP, g_egl_display));
     LOGLND((LOG_LEVEL_INFO, LOGS "g_egl_context %p", LOGP, g_egl_context));
-    cb = (EGLClientBuffer) (intptr_t) tex;
+    cb = (EGLClientBuffer) (size_t) tex;
     image = eglCreateImageKHR(g_egl_display, g_egl_context,
                               EGL_GL_TEXTURE_2D_KHR,
                               cb, g_create_image_attr);
@@ -178,7 +183,6 @@ xorgxrdp_helper_yami_encode(struct enc_info *ei, int tex,
         LOGLN((LOG_LEVEL_ERROR, LOGS "eglCreateImageKHR failed", LOGP));
         return 1;
     }
-
     if (!eglExportDMABUFImageQueryMESA(g_egl_display, image,
                                        &fourcc, &num_planes,
                                        &modifiers))
@@ -191,7 +195,6 @@ xorgxrdp_helper_yami_encode(struct enc_info *ei, int tex,
 
     LOGLND((LOG_LEVEL_INFO, LOGS "fourcc 0x%8.8X num_planes %d "
            "modifiers %d", LOGP, fourcc, num_planes, (int) modifiers));
-
     if (num_planes != 1)
     {
         LOGLN((LOG_LEVEL_ERROR, LOGS "eglExportDMABUFImageQueryMESA return "
@@ -199,7 +202,6 @@ xorgxrdp_helper_yami_encode(struct enc_info *ei, int tex,
         eglDestroyImageKHR(g_egl_display, image);
         return 1;
     }
-
     if (!eglExportDMABUFImageMESA(g_egl_display, image, &fd,
                                   &stride, &offset))
     {
@@ -208,43 +210,36 @@ xorgxrdp_helper_yami_encode(struct enc_info *ei, int tex,
         eglDestroyImageKHR(g_egl_display, image);
         return 1;
     }
-
     LOGLND((LOG_LEVEL_INFO, LOGS "fd %d stride %d offset %d", LOGP, fd,
-           stride, offset));
+            stride, offset));
     LOGLND((LOG_LEVEL_INFO, LOGS "width %d height %d", LOGP, ei->width,
-           ei->height));
-
+            ei->height));
     error = g_enc_funcs.yami_encoder_set_fd_src(ei->enc, fd,
                                                 ei->width, ei->height,
                                                 stride,
                                                 stride * ei->height,
-                                                //stride * ei->height * 3 / 2,
-                                                //0);
                                                 YI_YUY2);
-                                                //YI_NV12);
     LOGLND((LOG_LEVEL_INFO, LOGS "yami_encoder_set_fd_src rv %d",
             LOGP, error));
     if (error != YI_SUCCESS)
     {
         LOGLN((LOG_LEVEL_ERROR, LOGS "yami_encoder_set_fd_src failed",
                LOGP));
-        close(fd);
+        g_file_close(fd);
         eglDestroyImageKHR(g_egl_display, image);
         return 1;
     }
-
     error = g_enc_funcs.yami_encoder_encode(ei->enc, cdata, cdata_bytes);
     LOGLND((LOG_LEVEL_INFO, LOGS "encoder_encode rv %d cdata_bytes %d",
             LOGP, error, *cdata_bytes));
     if (error != YI_SUCCESS)
     {
         LOGLN((LOG_LEVEL_ERROR, LOGS "yami_encoder_encode failed", LOGP));
-        close(fd);
+        g_file_close(fd);
         eglDestroyImageKHR(g_egl_display, image);
         return 1;
     }
-
-    close(fd);
+    g_file_close(fd);
     eglDestroyImageKHR(g_egl_display, image);
     return 0;
 }

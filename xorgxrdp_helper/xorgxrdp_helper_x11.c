@@ -4,8 +4,11 @@
 #endif
 
 #if (!defined(XRDP_GLX)) && (!defined(XRDP_EGL))
+#if defined(XRDP_NVENC)
 #define XRDP_GLX
-//#define XRDP_EGL
+#elif defined(XRDP_YAMI)
+#define XRDP_EGL
+#endif
 #endif
 
 //#define LOG_LEVEL 11
@@ -32,9 +35,6 @@ static Screen *g_screen = NULL;
 static Window g_root_window = None;
 static Visual *g_vis = NULL;
 static GC g_gc;
-
-//#undef XRDP_NVENC
-//#undef XRDP_YAMI
 
 #if defined(XRDP_NVENC)
 
@@ -586,12 +586,11 @@ void main(void)\n\
     float x;\n\
     float y;\n\
     x = gl_FragCoord.x;\n\
-    x = floor(x) * 2.0;\n\
+    x = floor(x) * 2.0 + 0.5;\n\
     y = gl_FragCoord.y;\n\
-    pix = texture2D(tex, vec2(x + 0.5, y) / tex_size);\n\
-    pix1 = texture2D(tex, vec2(x + 1.5, y) / tex_size);\n\
-    pixs = pix + pix1;\n\
-    pixs /= 2.0;\n\
+    pix = texture2D(tex, vec2(x, y) / tex_size);\n\
+    pix1 = texture2D(tex, vec2(x + 1.0, y) / tex_size);\n\
+    pixs = (pix + pix1) / 2.0;\n\
     pix.a = 1.0;\n\
     pix1.a = 1.0;\n\
     pixs.a = 1.0;\n\
@@ -1199,9 +1198,13 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
     GLuint enc_texture;
 
     mi = g_mons + (mon_id & 0xF);
+#if defined(XRDP_NVENC)
     mi->tex_format = XH_YUV420;
-    //mi->tex_format = XH_YUV422;
-    //mi->tex_format = XH_YUV444;
+#elif defined(XRDP_YAMI)
+    mi->tex_format = XH_YUV422;
+#else
+    mi->tex_format = XH_YUV444;
+#endif
     if (mi->pixmap != 0)
     {
         LOGLN((LOG_LEVEL_ERROR, LOGS "error already setup", LOGP));
