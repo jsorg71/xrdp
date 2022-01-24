@@ -99,7 +99,7 @@ xrdp_encoder_nvenc_create(void)
 
 /*****************************************************************************/
 static int
-xrdp_encoder_cleanup_ncenc_encoder(struct nvenc_global *ng, struct nvenc_encoder *ne)
+xrdp_encoder_cleanup_nvenc_encoder(struct nvenc_global *ng, struct nvenc_encoder *ne)
 {
     int index;
 
@@ -138,7 +138,7 @@ xrdp_encoder_nvenc_delete(void *handle)
     for (index = 0; index < 16; index++)
     {
         ne = ng->encoders + index;
-        xrdp_encoder_cleanup_ncenc_encoder(ng, ne);
+        xrdp_encoder_cleanup_nvenc_encoder(ng, ne);
     }
     for (index = 0; index < ng->cu_dev_count; index++)
     {
@@ -177,7 +177,7 @@ xrdp_encoder_nvenc_encode(void *handle, int session,
     ne = ng->encoders + (session & 0xF);
     if ((ne->enc == NULL) || (ne->width != width) || (ne->height != height))
     {
-        xrdp_encoder_cleanup_ncenc_encoder(ng, ne);
+        xrdp_encoder_cleanup_nvenc_encoder(ng, ne);
         if ((width > 0) && (height > 0))
         {
             g_memset(&params, 0, sizeof(params));

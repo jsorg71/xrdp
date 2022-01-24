@@ -904,7 +904,7 @@ xorgxrdp_helper_x11_get_wait_objs(intptr_t *objs, int *obj_count)
 
 /*****************************************************************************/
 int
-xorgxrdp_helper_x11_check_wai_objs(void)
+xorgxrdp_helper_x11_check_wait_objs(void)
 {
     XEvent xevent;
 

@@ -47,6 +47,49 @@ struct monitor_info
   int flags;
 };
 
+enum display_resize_state {
+  WMRZ_QUEUED = 0,
+  WMRZ_ENCODER_DELETE,
+  WMRZ_EGFX_DELETE_SURFACE,
+  WMRZ_EGFX_CONN_CLOSE,
+  WMRZ_EGFX_CONN_CLOSING,
+  WMRZ_EGFX_CONN_CLOSED,
+  WRMZ_EGFX_DELETE,
+  WMRZ_SERVER_MONITOR_RESIZE,
+  WMRZ_SERVER_VERSION_MESSAGE_START,
+  WMRZ_SERVER_MONITOR_MESSAGE_PROCESSING,
+  WMRZ_SERVER_MONITOR_MESSAGE_PROCESSED,
+  WMRZ_XRDP_CORE_RESIZE,
+  WMRZ_EGFX_INITIALIZE,
+  WMRZ_EGFX_INITALIZING,
+  WMRZ_EGFX_INITIALIZED,
+  WMRZ_SERVER_INVALIDATE,
+  WMRZ_COMPLETE,
+  WMRZ_ERROR
+};
+
+#define XRDP_DISPLAY_RESIZE_STATE_TO_STR(status) \
+  ((status) == WMRZ_QUEUED ? "QUEUED" : \
+   (status) == WMRZ_ENCODER_DELETE ? "ENCODER_DELETE" : \
+   (status) == WMRZ_EGFX_DELETE_SURFACE ? "EGFX_DELETE_SURFACE" : \
+   (status) == WMRZ_EGFX_CONN_CLOSE ? "EGFX_CONN_CLOSE" : \
+   (status) == WMRZ_EGFX_CONN_CLOSING ? "EGFX_CONN_CLOSING" : \
+   (status) == WMRZ_EGFX_CONN_CLOSED ? "EGFX_CONN_CLOSED" : \
+   (status) == WRMZ_EGFX_DELETE ? "EGFX_DELETE" : \
+   (status) == WMRZ_SERVER_MONITOR_RESIZE ? "SERVER_MONITOR_RESIZE" : \
+   (status) == WMRZ_SERVER_VERSION_MESSAGE_START ? "SERVER_VERSION_MESSAGE_START" : \
+   (status) == WMRZ_SERVER_MONITOR_MESSAGE_PROCESSING ? "SERVER_MONITOR_MESSAGE_PROCESSING" : \
+   (status) == WMRZ_SERVER_MONITOR_MESSAGE_PROCESSED ? "SERVER_MONITOR_MESSAGE_PROCESSED" : \
+   (status) == WMRZ_XRDP_CORE_RESIZE ? "XRDP_CORE_RESIZE" : \
+   (status) == WMRZ_EGFX_INITIALIZE ? "EGFX_INITIALIZE" : \
+   (status) == WMRZ_EGFX_INITALIZING ? "EGFX_INITALIZING" : \
+   (status) == WMRZ_EGFX_INITIALIZED ? "EGFX_INITIALIZED" : \
+   (status) == WMRZ_SERVER_INVALIDATE ? "SERVER_INVALIDATE" : \
+   (status) == WMRZ_COMPLETE ? "COMPLETE" : \
+   (status) == WMRZ_ERROR ? "ERROR" : \
+   "unknown" \
+  )
+
 struct display_size_description
 {
   int monitorCount; /* number of monitors detected (max = 16) */
@@ -54,6 +97,9 @@ struct display_size_description
   struct monitor_info minfo_wm[XRDP_MAXIMUM_MONITORS]; /* client monitor data, non-negative values */
   int session_width;
   int session_height;
+  enum display_resize_state state;
+  int last_state_update_timestamp;
+  int start_time;
 };
 
 struct xrdp_client_info

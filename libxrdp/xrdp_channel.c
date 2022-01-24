@@ -23,6 +23,7 @@
 #endif
 
 #include "libxrdp.h"
+#include "xrdp_channel.h"
 
 /* todo, move these to constants.h */
 //#define CHANNEL_CHUNK_LENGTH 1600 /* todo, why is this so small? */
@@ -36,11 +37,6 @@
 #define CMD_DVC_DATA            0x30
 #define CMD_DVC_CLOSE_CHANNEL   0x40
 #define CMD_DVC_CAPABILITY      0x50
-
-#define XRDP_DRDYNVC_STATUS_CLOSED          0
-#define XRDP_DRDYNVC_STATUS_OPEN_SENT       1
-#define XRDP_DRDYNVC_STATUS_OPEN            2
-#define XRDP_DRDYNVC_STATUS_CLOSE_SENT      3
 
 /*****************************************************************************/
 /* returns pointer or nil on error */

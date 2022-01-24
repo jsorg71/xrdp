@@ -38,6 +38,9 @@
 #include "xrdp_encoder.h"
 #include "xrdp_sockets.h"
 #include "xrdp_egfx.h"
+#include "libxrdp.h"
+#include "xrdp_channel.h"
+#include <limits.h>
 
 #define LLOG_LEVEL 1
 #define LLOGLN(_level, _args) \
@@ -56,6 +59,8 @@ struct xrdp_mm *
 xrdp_mm_create(struct xrdp_wm *owner)
 {
     struct xrdp_mm *self;
+    char buf[1024];
+    int pid;
 
     self = (struct xrdp_mm *)g_malloc(sizeof(struct xrdp_mm), 1);
     self->wm = owner;
@@ -64,6 +69,11 @@ xrdp_mm_create(struct xrdp_wm *owner)
     self->login_values = list_create();
     self->resize_queue = list_create();
     self->login_values->auto_free = 1;
+
+    pid = g_getpid();
+    /* setup wait objects for signalling */
+    g_snprintf(buf, 1024, "xrdp_%8.8x_resize_state_machine", pid);
+    self->resize_state_machine = g_create_wait_obj(buf);
 
     LLOGLN(0, ("xrdp_mm_create: bpp %d mcs_connection_type %d "
            "jpeg_codec_id %d v3_codec_id %d rfx_codec_id %d "
@@ -166,7 +176,8 @@ xrdp_mm_delete(struct xrdp_mm *self)
     list_delete(self->login_names);
     list_delete(self->login_values);
     list_delete(self->resize_queue);
-    xrdp_egfx_delete(self->egfx);
+    g_delete_wait_obj(self->resize_state_machine);
+    xrdp_egfx_shutdown_full(self->egfx);
     g_free(self);
 }
 
@@ -1133,10 +1144,11 @@ xrdp_mm_egfx_send_planar_bitmap(struct xrdp_mm *self,
 }
 
 /******************************************************************************/
-static void
+static int
 xrdp_mm_egfx_invalidate_all(struct xrdp_mm *self) {
     struct xrdp_rect xr_rect;
     struct xrdp_bitmap *screen;
+    int error;
 
     LLOGLN(0, ("xrdp_mm_egfx_invalidate_all:"));
 
@@ -1150,7 +1162,8 @@ xrdp_mm_egfx_invalidate_all(struct xrdp_mm *self) {
     {
         self->wm->screen_dirty_region = xrdp_region_create(self->wm);
     }
-    xrdp_region_add_rect(self->wm->screen_dirty_region, &xr_rect);
+    error = xrdp_region_add_rect(self->wm->screen_dirty_region, &xr_rect);
+    return error;
 }
 
 /******************************************************************************/
@@ -1160,6 +1173,7 @@ xrdp_mm_egfx_caps_advertise(void* user, int caps_count,
 {
     struct xrdp_mm* self;
     struct xrdp_bitmap *screen;
+    struct display_size_description* description;
     int index;
     int best_index;
     int best_h264_index;
@@ -1255,8 +1269,16 @@ xrdp_mm_egfx_caps_advertise(void* user, int caps_count,
                                       screen->width, screen->height,
                                       XR_PIXEL_FORMAT_XRGB_8888);
         xrdp_egfx_send_map_surface(self->egfx, self->egfx->surface_id, 0, 0);
-        xrdp_mm_egfx_invalidate_all(self);
         self->encoder = xrdp_encoder_create(self);
+        xrdp_mm_egfx_invalidate_all(self);
+        if (self->resize_queue != 0 && self->resize_queue > 0) {
+            description = (struct display_size_description*)list_get_item(self->resize_queue, 0);
+            if (description->state == WMRZ_EGFX_INITALIZING) {
+                LLOGLN(10, ("xrdp_mm_egfx_caps_advertise: egfx created."));
+                description->state = WMRZ_EGFX_INITIALIZED;
+                g_set_wait_obj(self->resize_state_machine);
+            }
+        }
         if (self->gfx_delay_autologin)
         {
             self->gfx_delay_autologin = 0;
@@ -1277,7 +1299,6 @@ xrdp_mm_egfx_caps_advertise(void* user, int caps_count,
         self->encoder = xrdp_encoder_create(self);
         xrdp_bitmap_invalidate(screen, &lrect);
     }
-    self->resizing = 0;
     return 0;
 }
 
@@ -1392,6 +1413,16 @@ struct display_size_description*
 process_monitor_stream(struct stream *s, int full_parameters);
 
 /******************************************************************************/
+int
+advance_resize_state_machine(tbus resize_state_machine, struct display_size_description *description, enum display_resize_state new_state) {
+    LLOGLN(0, ("process_dynamic_monitor_description: Processing resize to: %d x %d. Advancing state from %s to %s. Previous state took %d MS.", description->session_width, description->session_height, XRDP_DISPLAY_RESIZE_STATE_TO_STR(description->state), XRDP_DISPLAY_RESIZE_STATE_TO_STR(new_state), g_time3() - description->last_state_update_timestamp));
+    description->state = new_state;
+    description->last_state_update_timestamp = g_time3();
+    g_set_wait_obj(resize_state_machine);
+    return 0;
+}
+
+/******************************************************************************/
 static int
 dynamic_monitor_data(intptr_t id, int chan_id, char *data, int bytes)
 {
@@ -1403,21 +1434,15 @@ dynamic_monitor_data(intptr_t id, int chan_id, char *data, int bytes)
     struct xrdp_process *pro;
     struct xrdp_wm *wm;
     int MonitorLayoutSize;
+    struct display_size_description *description;
 
-    LLOGLN(0, ("dynamic_monitor_data:"));
+    LLOGLN(10, ("dynamic_monitor_data:"));
     pro = (struct xrdp_process *) id;
     wm = pro->wm;
 
     if (wm->client_info->suppress_output == 1) {
-        LLOGLN(0, ("dynamic_monitor_data: Not allowing resize. Suppress output is active."));
+        LLOGLN(10, ("dynamic_monitor_data: Not allowing resize. Suppress output is active."));
         return error;
-    }
-    if (wm->mm->resize_queue->count > 0) {
-        struct display_size_description *description = (struct display_size_description *)list_get_item(wm->mm->resize_queue, 0);
-        if (description->monitorCount == 0 && description->session_height == 0 && description->session_width == 0) {
-            LLOGLN(0, ("dynamic_monitor_data: Ignoring resize data. This is probably an erroneous message from connection startup."));
-            return error;
-        }
     }
 
     g_memset(&ls, 0, sizeof(ls));
@@ -1428,8 +1453,7 @@ dynamic_monitor_data(intptr_t id, int chan_id, char *data, int bytes)
     s = &ls;
     in_uint32_le(s, msg_type);
     in_uint32_le(s, msg_length);
-    LLOGLN(0, ("dynamic_monitor_data: msg_type %d msg_length %d",
-           msg_type, msg_length));
+    LLOGLN(0, ("dynamic_monitor_data: msg_type %d msg_length %d", msg_type, msg_length));
 
     if (msg_type != DISPLAYCONTROL_PDU_TYPE_MONITOR_LAYOUT)
     {
@@ -1440,11 +1464,13 @@ dynamic_monitor_data(intptr_t id, int chan_id, char *data, int bytes)
     if (MonitorLayoutSize != 40)
     {
         /* 2.2.2.2 DISPLAYCONTROL_MONITOR_LAYOUT_PDU */
-        LLOGLN(0, ("dynamic_monitor_data: MonitorLayoutSize is %d. Per spec it must be 40.", MonitorLayoutSize));
+        LLOGLN(10, ("dynamic_monitor_data: MonitorLayoutSize is %d. Per spec it must be 40.", MonitorLayoutSize));
         return 1;
     }
-    struct display_size_description *description = process_monitor_stream(s, 1);
+    description = process_monitor_stream(s, 1);
     list_add_item(wm->mm->resize_queue, (tintptr)description);
+    description->start_time = g_time3();
+    advance_resize_state_machine(wm->mm->resize_state_machine, description, WMRZ_QUEUED);
     return 0;
 }
 
@@ -1539,108 +1565,229 @@ xrdp_mm_suppress_output(struct xrdp_mm* self, int suppress,
 static int
 process_dynamic_monitor_description(struct xrdp_wm *wm, struct display_size_description *description) {
     int error = 0;
-    struct xrdp_mm* mm = wm->mm;
-    struct xrdp_mod* module = mm->mod;
+
+    struct xrdp_mm *mm = wm->mm;
+    struct xrdp_mod *module = mm->mod;
+
+    struct xrdp_rdp *rdp;
+    struct xrdp_sec *sec;
+    struct xrdp_channel *chan;
 
     if (wm->client_info->suppress_output == 1) {
         LLOGLN(0, ("process_dynamic_monitor_description: Not allowing resize. Suppress output is active."));
         return 0;
     }
-    if (description->session_width <= 0 || description->session_height <=0) {
+    if (description->session_width <= 0 || description->session_height <= 0) {
         LLOGLN(0, ("process_dynamic_monitor_description: Not allowing resize due to invalid dimensions (w: %d x h: %d)", description->session_width, description->session_height));
         return 0;
     }
+    if (description->state == WMRZ_QUEUED && description->session_width == wm->client_info->width && description->session_height == wm->client_info->height) {
+        LLOGLN(0, ("process_dynamic_monitor_description: Not resizing. Already this size. (w: %d x h: %d)", description->session_width, description->session_height));
+        advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_COMPLETE);
+        return 0;
+    }
 
-    mm->resizing = 1;
-
+    switch (description->state) {
+        case WMRZ_QUEUED:
 #if defined(XRDP_X264) || defined(XRDP_NVENC)
-    if (error == 0 && module != 0 && mm->egfx_up != 0 && mm->egfx != 0) {
-        xrdp_egfx_delete(wm->mm->egfx);
-        mm->egfx = NULL;
-        mm->egfx_up = 0;
-    }
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_ENCODER_DELETE);
+#else
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_XRDP_CORE_RESIZE);
 #endif
-    // TODO: Unify this logic with server_reset
-    error = libxrdp_reset(wm->session, description->session_width, description->session_height, wm->screen->bpp);
-    if (error != 0)
-    {
-        LLOGLN(0, ("dynamic_monitor_data: libxrdp_reset failed %d", error));
-        goto exit;
-    }
-    /* reset cache */
-    error = xrdp_cache_reset(wm->cache, wm->client_info);
-    if (error != 0)
-    {
-        LLOGLN(0, ("dynamic_monitor_data: xrdp_cache_reset failed %d", error));
-        goto exit;
-    }
-    /* load some stuff */
-    error = xrdp_wm_load_static_colors_plus(wm, 0);
-    if (error != 0)
-    {
-        LLOGLN(0, ("dynamic_monitor_data: xrdp_wm_load_static_colors_plus failed %d", error));
-        goto exit;
-    }
-
-    error = xrdp_wm_load_static_pointers(wm);
-    if (error != 0)
-    {
-        LLOGLN(0, ("dynamic_monitor_data: xrdp_wm_load_static_pointers failed %d", error));
-        goto exit;
-    }
-    /* resize the main window */
-    error = xrdp_bitmap_resize(wm->screen, description->session_width, description->session_height);
-    if (error != 0)
-    {
-        LLOGLN(0, ("dynamic_monitor_data: xrdp_bitmap_resize failed %d", error));
-        goto exit;
-    }
-    /* redraw */
-    error = xrdp_bitmap_invalidate(wm->screen, 0);
-    if (error != 0)
-    {
-        LLOGLN(0, ("dynamic_monitor_data: xrdp_bitmap_invalidate failed %d", error));
-        goto exit;
-    }
-
-    if (module != 0) {
-        error = module->mod_server_version_message(module);
-        if (error != 0)
-        {
-            LLOGLN(0, ("dynamic_monitor_data: mod_server_version_message failed %d", error));
-            goto exit;
-        }
-        error = module->mod_server_monitor_resize(module, description->session_width, description->session_height, wm->screen->bpp);
-        if (error != 0)
-        {
-            LLOGLN(0, ("dynamic_monitor_data: mod_server_monitor_resize failed %d", error));
-            goto exit;
-        }
-        error = module->mod_server_monitor_full_invalidate(module, description->session_width, description->session_height);
-        if (error != 0)
-        {
-            LLOGLN(0, ("dynamic_monitor_data: mod_server_monitor_full_invalidate failed %d", error));
-            goto exit;
-        }
-    }
-
+            break;
 #if defined(XRDP_X264) || defined(XRDP_NVENC)
-    if (error == 0 && mm->egfx == NULL && mm->egfx_up == 0) {
-        //Disable the encoder until the resize is complete. Ack all frames to prevent an infinite loop.
-        xrdp_encoder_delete(mm->encoder);
-        mm->encoder = NULL;
-        egfx_initialize(mm);
-    }
+        case WMRZ_ENCODER_DELETE:
+            // Disable the encoder until the resize is complete.
+            xrdp_encoder_delete(mm->encoder);
+            mm->encoder = NULL;
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_EGFX_DELETE_SURFACE);
+            break;
+        case WMRZ_EGFX_DELETE_SURFACE:
+            if (error == 0 && module != 0) {
+                xrdp_egfx_shutdown_delete_surface(wm->mm->egfx);
+            }
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_EGFX_CONN_CLOSE);
+            break;
+        case WMRZ_EGFX_CONN_CLOSE:
+            if (error == 0 && module != 0) {
+                xrdp_egfx_shutdown_close_connection(wm->mm->egfx);
+            }
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_EGFX_CONN_CLOSING);
+            break;
+        // Also processed in xrdp_egfx_close_response
+        case WMRZ_EGFX_CONN_CLOSING:
+            rdp = (struct xrdp_rdp *) (mm->wm->session->rdp);
+            sec = rdp->sec_layer;
+            chan = sec->chan_layer;
+
+            // Continue to check to see if the connection is closed. If it ever is, advance the state machine!
+            if (chan->drdynvcs[mm->egfx->channel_id].status == XRDP_DRDYNVC_STATUS_CLOSED) {
+                advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_EGFX_CONN_CLOSED);
+                break;
+            }
+            g_set_wait_obj(mm->resize_state_machine);
+            break;
+        case WMRZ_EGFX_CONN_CLOSED:
+            advance_resize_state_machine(mm->resize_state_machine, description, WRMZ_EGFX_DELETE);
+            break;
+        case WRMZ_EGFX_DELETE:
+            if (error == 0 && module != 0) {
+                xrdp_egfx_shutdown_delete(wm->mm->egfx);
+                mm->egfx = NULL;
+                mm->egfx_up = 0;
+            }
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_SERVER_MONITOR_RESIZE);
+            break;
 #endif
-    wm->client_info->monitorCount = description->monitorCount;
-    wm->client_info->width = description->session_width;
-    wm->client_info->height = description->session_height;
-    g_memcpy(wm->client_info->minfo, description->minfo, sizeof(struct monitor_info) * XRDP_MAXIMUM_MONITORS);
-    g_memcpy(wm->client_info->minfo_wm, description->minfo_wm, sizeof(struct monitor_info) * XRDP_MAXIMUM_MONITORS);
+        case WMRZ_SERVER_MONITOR_RESIZE:
+            error = module->mod_server_monitor_resize(module, description->session_width, description->session_height, wm->screen->bpp);
+            if (error != 0)
+            {
+                LLOGLN(0, ("process_dynamic_monitor_description: mod_server_monitor_resize failed %d", error));
+                goto exit;
+            }
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_SERVER_VERSION_MESSAGE_START);
+            break;
+        case WMRZ_SERVER_VERSION_MESSAGE_START:
+            error = module->mod_server_version_message(module);
+            if (error != 0)
+            {
+                LLOGLN(0, ("process_dynamic_monitor_description: mod_server_version_message failed %d", error));
+                goto exit;
+            }
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_SERVER_MONITOR_MESSAGE_PROCESSING);
+            break;
+        // Not processed here. Processed in server_reset
+        // case WMRZ_SERVER_MONITOR_MESSAGE_PROCESSING:
+        case WMRZ_SERVER_MONITOR_MESSAGE_PROCESSED:
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_XRDP_CORE_RESIZE);
+            break;
+        case WMRZ_XRDP_CORE_RESIZE:
+            // TODO: Unify this logic with server_reset
+            error = libxrdp_reset(wm->session, description->session_width, description->session_height, wm->screen->bpp);
+            if (error != 0)
+            {
+                LLOGLN(0, ("process_dynamic_monitor_description: libxrdp_reset failed %d", error));
+                goto exit;
+            }
+            /* reset cache */
+            error = xrdp_cache_reset(wm->cache, wm->client_info);
+            if (error != 0)
+            {
+                LLOGLN(0, ("process_dynamic_monitor_description: xrdp_cache_reset failed %d", error));
+                goto exit;
+            }
+            /* load some stuff */
+            error = xrdp_wm_load_static_colors_plus(wm, 0);
+            if (error != 0)
+            {
+                LLOGLN(0, ("process_dynamic_monitor_description: xrdp_wm_load_static_colors_plus failed %d", error));
+                goto exit;
+            }
+
+            error = xrdp_wm_load_static_pointers(wm);
+            if (error != 0)
+            {
+                LLOGLN(0, ("process_dynamic_monitor_description: xrdp_wm_load_static_pointers failed %d", error));
+                goto exit;
+            }
+            /* resize the main window */
+            error = xrdp_bitmap_resize(wm->screen, description->session_width, description->session_height);
+            if (error != 0)
+            {
+                LLOGLN(0, ("process_dynamic_monitor_description: xrdp_bitmap_resize failed %d", error));
+                goto exit;
+            }
+            wm->client_info->monitorCount = description->monitorCount;
+            wm->client_info->width = description->session_width;
+            wm->client_info->height = description->session_height;
+            g_memcpy(wm->client_info->minfo, description->minfo, sizeof(struct monitor_info) * XRDP_MAXIMUM_MONITORS);
+            g_memcpy(wm->client_info->minfo_wm, description->minfo_wm, sizeof(struct monitor_info) * XRDP_MAXIMUM_MONITORS);
+
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_EGFX_INITIALIZE);
+            break;
+        case WMRZ_EGFX_INITIALIZE:
+#if defined(XRDP_X264) || defined(XRDP_NVENC)
+            if (error == 0 && mm->egfx == NULL && mm->egfx_up == 0) {
+                egfx_initialize(mm);
+                advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_EGFX_INITALIZING);
+            }
+            else
+            {
+                advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_EGFX_INITIALIZED);
+            }
+#else
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_EGFX_INITIALIZED);
+#endif
+            break;
+        // Not processed here. Processed in xrdp_mm_egfx_caps_advertise
+        // case WMRZ_EGFX_INITALIZING:
+        case WMRZ_EGFX_INITIALIZED:
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_SERVER_INVALIDATE);
+            break;
+        case WMRZ_SERVER_INVALIDATE:
+            /* redraw */
+            error = xrdp_bitmap_invalidate(wm->screen, 0);
+            if (error != 0)
+            {
+                LLOGLN(0, ("process_dynamic_monitor_description: xrdp_bitmap_invalidate failed %d", error));
+                goto exit;
+            }
+            if (module != 0) {
+                // Ack all frames to speed up resize.
+                module->mod_frame_ack(module, 0, INT_MAX);
+            }
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_COMPLETE);
+            break;
+        default:
+            break;
+    }
     return 0;
 exit:
-    mm->resizing = 0;
+    advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_ERROR);
     return error;
+}
+
+/******************************************************************************/
+static int
+dynamic_monitor_process_queue(struct xrdp_mm *self) {
+    LLOGLN(0, ("dynamic_monitor_process_queue:"));
+
+    if (self == 0) {
+        return 0;
+    }
+    if (self->resize_queue == 0) {
+        // Potentially the client does not support resizing, so the queue was never created.
+        return 0;
+    }
+    if (self->resize_queue->count <= 0)
+    {
+        return 0;
+    }
+
+    struct display_size_description* description;
+    while (self->resize_queue->count > 0) {
+        description = (struct display_size_description*)list_get_item(self->resize_queue, 0);
+        if (description->state == WMRZ_COMPLETE) {
+            LLOGLN(0, ("dynamic_monitor_process_queue: Clearing completed resize (w: %d x h: %d). It took %d MS.", description->session_width, description->session_height, g_time3() - description->start_time));
+        }
+        else if (description->state == WMRZ_ERROR)
+        {
+            LLOGLN(0, ("dynamic_monitor_process_queue: Clearing completed resize (w: %d x h: %d)", description->session_width, description->session_height));
+        }
+        else if (description->session_width <= 0 && description->session_height <= 0)
+        {
+            LLOGLN(0, ("dynamic_monitor_process_queue: Not allowing resize due to invalid dimensions (w: %d x h: %d)", description->session_width, description->session_height));
+        }
+        else
+        {
+            // No errors, process it!
+            return process_dynamic_monitor_description(self->wm, description);
+        }
+        list_remove_item(self->resize_queue, 0);
+        g_free(description);
+    }
+    return 0;
 }
 
 /*****************************************************************************/
@@ -3042,6 +3189,12 @@ xrdp_mm_get_wait_objs(struct xrdp_mm *self,
     {
         read_objs[(*rcount)++] = self->encoder->xrdp_encoder_event_processed;
     }
+
+    if (self->resize_queue != 0)
+    {
+        read_objs[(*rcount)++] = self->resize_state_machine;
+    }
+
     if (self->wm->screen_dirty_region != NULL)
     {
         if (xrdp_region_not_empty(self->wm->screen_dirty_region))
@@ -3349,6 +3502,15 @@ xrdp_mm_check_wait_objs(struct xrdp_mm *self)
             xrdp_mm_process_enc_done(self);
         }
     }
+
+    if (self->resize_queue != 0 && self->resize_queue->count > 0) {
+        if (g_is_wait_obj_set(self->resize_state_machine))
+        {
+            g_reset_wait_obj(self->resize_state_machine);
+            dynamic_monitor_process_queue(self);
+        }
+    }
+
     if (self->wm->screen_dirty_region != NULL)
     {
         if (xrdp_region_not_empty(self->wm->screen_dirty_region))
@@ -3375,18 +3537,6 @@ xrdp_mm_check_wait_objs(struct xrdp_mm *self)
                     LLOGLN(10, ("xrdp_mm_check_wait_objs: empty"));
                 }
             }
-        }
-#if defined(XRDP_X264) || defined (XRDP_NVENC)
-        else if (self->resize_queue->count > 0 && self->resizing == 0 && self->mod != 0 && self->encoder != 0 && self->egfx_up == 1)
-#else
-        else if (self->resize_queue->count > 0 && self->resizing == 0 && self->mod != 0)
-#endif
-        {
-            struct display_size_description*description = (struct display_size_description*)list_get_item(self->resize_queue, 0);
-            list_remove_item(self->resize_queue, 0);
-            LLOGLN(10, ("xrdp_mm_get_wait_objs: Processing resize to: %d x %d", description->session_width, description->session_height));
-            process_dynamic_monitor_description(self->wm, description);
-            g_free(description);
         }
     }
     return rv;
@@ -4008,27 +4158,32 @@ server_draw_text(struct xrdp_mod *mod, int font,
 }
 
 /*****************************************************************************/
-
 /* Note : if this is called on a multimon setup, the client is resized
  * to a single monitor */
 int
 server_reset(struct xrdp_mod *mod, int width, int height, int bpp)
 {
     struct xrdp_wm *wm;
+    struct xrdp_mm *mm;
+    struct display_size_description *description;
+
+    LLOGLN(10, ("server_reset:"));
 
     wm = (struct xrdp_wm *)(mod->wm);
+    if (wm == 0) {
+        return 1;
+    }
+    mm = wm->mm;
 
     if (wm->client_info == 0)
     {
         return 1;
     }
-
     /* older client can't resize */
     if (wm->client_info->build <= 419)
     {
         return 0;
     }
-
     /* if same (and only one monitor on client) don't need to do anything */
     if (wm->client_info->width == width &&
         wm->client_info->height == height &&
@@ -4038,12 +4193,29 @@ server_reset(struct xrdp_mod *mod, int width, int height, int bpp)
         return 0;
     }
 
+    // bpp of zero is impossible.
+    // This is a signal from xup that
+    // It is finished resizing.
+    if (bpp == 0) {
+        if (mm == 0) {
+            return 1;
+        }
+        if (mm->resize_queue == 0 || mm->resize_queue->count <= 0) {
+            return 0;
+        }
+        description = (struct display_size_description*)list_get_item(mm->resize_queue, 0);
+        if (description->state == WMRZ_SERVER_MONITOR_MESSAGE_PROCESSING) {
+            LLOGLN(10, ("server_reset: Advancing server monitor resized."));
+            advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_SERVER_MONITOR_MESSAGE_PROCESSED);
+        }
+        return 0;
+    }
+
     /* reset lib, client_info gets updated in libxrdp_reset */
     if (libxrdp_reset(wm->session, width, height, bpp) != 0)
     {
         return 1;
     }
-
     /* reset cache */
     xrdp_cache_reset(wm->cache, wm->client_info);
     /* resize the main window */

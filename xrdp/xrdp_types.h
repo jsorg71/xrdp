@@ -310,7 +310,7 @@ struct xrdp_mm
   int egfx_flags;
   int gfx_delay_autologin;
   struct list *resize_queue;
-  int resizing;
+  tbus resize_state_machine;
 };
 
 struct xrdp_key_info

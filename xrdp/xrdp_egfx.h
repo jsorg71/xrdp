@@ -121,11 +121,16 @@ struct xrdp_egfx
     int (*caps_advertise)(void* user, int num_caps, int *version, int *flags);
     int (*frame_ack)(void* user, int queue_depth, int frame_id, int frames_decoded);
 };
-
 int
 xrdp_egfx_create(struct xrdp_mm *mm, struct xrdp_egfx **egfx);
 int
-xrdp_egfx_delete(struct xrdp_egfx *egfx);
+xrdp_egfx_shutdown_delete_surface(struct xrdp_egfx *egfx);
+int
+xrdp_egfx_shutdown_close_connection(struct xrdp_egfx *egfx);
+int
+xrdp_egfx_shutdown_delete(struct xrdp_egfx *egfx);
+int
+xrdp_egfx_shutdown_full(struct xrdp_egfx *egfx);
 int
 xrdp_egfx_send_create_surface(struct xrdp_egfx *egfx, int surface_id,
                               int width, int height, int pixel_format);

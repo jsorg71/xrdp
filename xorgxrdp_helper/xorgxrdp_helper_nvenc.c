@@ -1,4 +1,3 @@
-
 #if defined(HAVE_CONFIG_H)
 #include <config_ac.h>
 #endif
@@ -46,6 +45,8 @@ struct enc_info
     NV_ENC_BUFFER_FORMAT mappedBufferFmt;
     NV_ENC_REGISTERED_PTR registeredResource;
 };
+
+extern int xrdp_invalidate;
 
 /*****************************************************************************/
 int
@@ -193,6 +194,8 @@ xorgxrdp_helper_nvenc_create_encoder(int width, int height, int tex,
 
     encCfg.encodeCodecConfig.h264Config.chromaFormatIDC = 1;
     encCfg.encodeCodecConfig.h264Config.idrPeriod = NVENC_INFINITE_GOPLENGTH;
+    encCfg.encodeCodecConfig.h264Config.repeatSPSPPS = 1;
+    encCfg.encodeCodecConfig.h264Config.disableSPSPPS = 0;
 
     g_memset(&createEncodeParams, 0, sizeof(createEncodeParams));
     createEncodeParams.version = NV_ENC_INITIALIZE_PARAMS_VER;
@@ -299,8 +302,6 @@ xorgxrdp_helper_nvenc_encode(struct enc_info *ei, int tex,
     NVENCSTATUS nv_error;
     int rv;
 
-    (void) tex;
-
     g_memset(&picParams, 0, sizeof(picParams));
     picParams.version = NV_ENC_PIC_PARAMS_VER;
     picParams.inputBuffer = ei->mappedResource;
@@ -310,6 +311,12 @@ xorgxrdp_helper_nvenc_encode(struct enc_info *ei, int tex,
     picParams.outputBitstream = ei->bitstreamBuffer;
     picParams.inputTimeStamp = ei->frameCount;
     picParams.pictureStruct = NV_ENC_PIC_STRUCT_FRAME;
+    picParams.encodePicFlags = NV_ENC_PIC_FLAG_OUTPUT_SPSPPS;
+    if (xrdp_invalidate > 0 || ei->frameCount == 0) {
+        picParams.encodePicFlags |= NV_ENC_PIC_FLAG_FORCEIDR;
+        xrdp_invalidate = MAX(0, xrdp_invalidate - 1);
+        LOGLN((LOG_LEVEL_INFO, LOGS "Forcing NVENC H264 IDR SPSPPS for frame id: %d", LOGP, ei->frameCount));
+    }
     nv_error = g_enc_funcs.nvEncEncodePicture(ei->enc, &picParams);
     rv = 1;
     if (nv_error == NV_ENC_SUCCESS)
@@ -317,6 +324,7 @@ xorgxrdp_helper_nvenc_encode(struct enc_info *ei, int tex,
         g_memset(&lockBitstream, 0, sizeof(lockBitstream));
         lockBitstream.version = NV_ENC_LOCK_BITSTREAM_VER;
         lockBitstream.outputBitstream = ei->bitstreamBuffer;
+        lockBitstream.doNotWait = 0;
         nv_error = g_enc_funcs.nvEncLockBitstream(ei->enc, &lockBitstream);
         if (nv_error == NV_ENC_SUCCESS)
         {
@@ -334,4 +342,3 @@ xorgxrdp_helper_nvenc_encode(struct enc_info *ei, int tex,
     }
     return rv;
 }
-

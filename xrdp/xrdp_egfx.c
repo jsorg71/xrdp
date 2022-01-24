@@ -31,6 +31,8 @@
 #include "parse.h"
 #include "xrdp.h"
 #include "xrdp_egfx.h"
+#include "libxrdp.h"
+#include "xrdp_channel.h"
 
 #define LLOG_LEVEL 1
 #define LLOGLN(_level, _args) \
@@ -545,7 +547,7 @@ xrdp_egfx_send_reset_graphics(struct xrdp_egfx *egfx, int width, int height,
     int index;
     struct stream *s;
 
-    LLOGLN(0, ("xrdp_egfx_send_reset_graphics:"));
+    LLOGLN(10, ("xrdp_egfx_send_reset_graphics:"));
     if (monitor_count > 16)
     {
         return 1;
@@ -581,8 +583,11 @@ xrdp_egfx_send_reset_graphics(struct xrdp_egfx *egfx, int width, int height,
             out_uint32_le(s, mi[index].right);
             out_uint32_le(s, mi[index].bottom);
             out_uint32_le(s, mi[index].is_primary);
+            LLOGLN(10, ("xrdp_egfx_send_reset_graphics: (index %d) monitor left %d top %d right %d bottom %d is_primary %d",
+                index, mi[index].left, mi[index].top, mi[index].right, mi[index].bottom, mi[index].is_primary));
         }
     }
+    LLOGLN(10, ("xrdp_egfx_send_reset_graphics: width %d height %d monitorcount %d", width, height, monitor_count));
     if (monitor_count < 16)
     {
         bytes = 340 - (20 + (monitor_count * 20));
@@ -591,8 +596,7 @@ xrdp_egfx_send_reset_graphics(struct xrdp_egfx *egfx, int width, int height,
     s_mark_end(s);
     bytes = (int) (s->end - s->data);
     error = xrdp_egfx_send_data(egfx, s->data, bytes);
-    LLOGLN(0, ("xrdp_egfx_send_reset_graphics: xrdp_egfx_send_data error %d",
-           error));
+    LLOGLN(10, ("xrdp_egfx_send_reset_graphics: xrdp_egfx_send_data error %d", error));
     free_stream(s);
     return error;
 }
@@ -754,16 +758,35 @@ xrdp_egfx_process(struct xrdp_egfx *egfx, struct stream *s)
 static int
 xrdp_egfx_open_response(intptr_t id, int chan_id, int creation_status)
 {
-    LLOGLN(0, ("xrdp_egfx_open_response:"));
+    LLOGLN(10, ("xrdp_egfx_open_response:"));
     return 0;
 }
+
+int
+advance_resize_state_machine(tbus resize_state_machine, struct display_size_description *description, enum display_resize_state new_state);
 
 /******************************************************************************/
 /* from client */
 static int
 xrdp_egfx_close_response(intptr_t id, int chan_id)
 {
-    LLOGLN(0, ("xrdp_egfx_close_response:"));
+    struct xrdp_process *process;
+    struct xrdp_mm *mm;
+    struct display_size_description *description;
+
+    LLOGLN(10, ("xrdp_egfx_close_response:"));
+
+    process = (struct xrdp_process *) id;
+    mm = process->wm->mm;
+
+    if (mm->resize_queue == 0 || mm->resize_queue->count <= 0) {
+        return 0;
+    }
+    description = (struct display_size_description*)list_get_item(mm->resize_queue, 0);
+    if (description->state == WMRZ_EGFX_CONN_CLOSING) {
+        LLOGLN(0, ("xrdp_egfx_close_response: egfx deleted."));
+        advance_resize_state_machine(mm->resize_state_machine, description, WMRZ_EGFX_CONN_CLOSED);
+    }
     return 0;
 }
 
@@ -781,7 +804,7 @@ xrdp_egfx_data_first(intptr_t id, int chan_id, char *data, int bytes,
     egfx = process->wm->mm->egfx;
     if (egfx->s != NULL)
     {
-        LLOGLN(0, ("xrdp_egfx_data_first: error"));
+        LLOGLN(10, ("xrdp_egfx_data_first: Error! Stream is not working on initial data received!"));
     }
     make_stream(egfx->s);
     init_stream(egfx->s, total_bytes);
@@ -797,11 +820,32 @@ xrdp_egfx_data(intptr_t id, int chan_id, char *data, int bytes)
     int error;
     struct stream ls;
     struct xrdp_process *process;
+    struct xrdp_wm *wm;
+    struct xrdp_mm *mm;
     struct xrdp_egfx *egfx;
 
     LLOGLN(10, ("xrdp_egfx_data:"));
+
     process = (struct xrdp_process *) id;
-    egfx = process->wm->mm->egfx;
+    if (process == NULL) {
+        return 0;
+    }
+
+    wm = process->wm;
+    if (wm == NULL) {
+        return 0;
+    }
+
+    mm = wm->mm;
+    if (mm == NULL) {
+        return 0;
+    }
+
+    egfx = mm->egfx;
+    if (egfx == NULL) {
+        return 0;
+    }
+
     if (egfx->s == NULL)
     {
         g_memset(&ls, 0, sizeof(ls));
@@ -813,7 +857,7 @@ xrdp_egfx_data(intptr_t id, int chan_id, char *data, int bytes)
     }
     if (!s_check_rem_out(egfx->s, bytes))
     {
-        LLOGLN(0, ("xrdp_egfx_data: error"));
+        LLOGLN(10, ("xrdp_egfx_data: error"));
         return 1;
     }
     out_uint8a(egfx->s, data, bytes);
@@ -852,8 +896,7 @@ xrdp_egfx_create(struct xrdp_mm *mm, struct xrdp_egfx **egfx)
                                  "Microsoft::Windows::RDS::Graphics",
                                  1, /* WTS_CHANNEL_OPTION_DYNAMIC */
                                  &procs, &(self->channel_id));
-    LLOGLN(0, ("xrdp_egfx_create: error %d channel_id %d",
-           error, self->channel_id));
+    LLOGLN(0, ("xrdp_egfx_create: error %d channel_id %d", error, self->channel_id));
     self->session = process->session;
     self->surface_id = 0;
     *egfx = self;
@@ -862,19 +905,96 @@ xrdp_egfx_create(struct xrdp_mm *mm, struct xrdp_egfx **egfx)
 
 /******************************************************************************/
 int
-xrdp_egfx_delete(struct xrdp_egfx *egfx)
-{
-    LLOGLN(0, ("xrdp_egfx_delete:"));
+xrdp_egfx_shutdown_delete_surface(struct xrdp_egfx *egfx) {
+    int error;
 
-    int error = xrdp_egfx_send_delete_surface(egfx, egfx->surface_id);
+    LLOGLN(10, ("xrdp_egfx_shutdown_delete_surface:"));
+
+    if (egfx == 0) {
+        LLOGLN(10, ("xrdp_egfx_shutdown_delete_surface: EGFX is already null!"));
+        return 0;
+    }
+
+    error = xrdp_egfx_send_delete_surface(egfx, egfx->surface_id);
     if (error != 0)
     {
-        LLOGLN(0, ("dynamic_monitor_data: xrdp_egfx_send_delete_surface failed %d", error));
+        LLOGLN(10, ("xrdp_egfx_shutdown_delete_surface: xrdp_egfx_send_delete_surface failed %d", error));
+    }
+    return error;
+}
+
+/******************************************************************************/
+int
+xrdp_egfx_shutdown_close_connection(struct xrdp_egfx *egfx) {
+    int error;
+
+    LLOGLN(10, ("xrdp_egfx_shutdown_close_connection:"));
+
+    if (egfx == 0) {
+        LLOGLN(10, ("xrdp_egfx_shutdown_close_connection: EGFX is already null!"));
+        return 0;
+    }
+
+    error = libxrdp_drdynvc_close(egfx->session, egfx->channel_id);
+    if (error != 0)
+    {
+        LLOGLN(10, ("xrdp_egfx_shutdown_close_connection: libxrdp_drdynvc_close failed %d", error));
         return error;
     }
-    error = libxrdp_drdynvc_close(egfx->session, egfx->channel_id);
+
+    return error;
+}
+
+/******************************************************************************/
+int
+xrdp_egfx_shutdown_delete(struct xrdp_egfx *egfx)
+{
+    int error;
+
+    LLOGLN(10, ("xrdp_egfx_delete:"));
+
+    if (egfx == 0) {
+        LLOGLN(10, ("xrdp_egfx_delete: EGFX is already null!"));
+        return 0;
+    }
 
     g_free(egfx);
+
+    return error;
+}
+
+/******************************************************************************/
+int
+xrdp_egfx_shutdown_full(struct xrdp_egfx *egfx) {
+    int error;
+
+    LLOGLN(10, ("xrdp_egfx_shutdown_full:"));
+
+    if (egfx == 0) {
+        LLOGLN(10, ("xrdp_egfx_shutdown_full: EGFX is already null!"));
+        return 0;
+    }
+
+    error = xrdp_egfx_shutdown_delete_surface(egfx);
+    if (error != 0)
+    {
+        LLOGLN(10, ("xrdp_egfx_shutdown_full: xrdp_egfx_shutdown_delete_surface failed %d", error));
+        return error;
+    }
+
+    error = xrdp_egfx_shutdown_close_connection(egfx);
+    if (error != 0)
+    {
+        LLOGLN(10, ("xrdp_egfx_shutdown_full: xrdp_egfx_shutdown_close_connection failed %d", error));
+        return error;
+    }
+
+    error = xrdp_egfx_shutdown_delete(egfx);
+    if (error != 0)
+    {
+        LLOGLN(10, ("xrdp_egfx_shutdown_full: xrdp_egfx_shutdown_delete failed %d", error));
+        return error;
+    }
 
     return error;
 }
