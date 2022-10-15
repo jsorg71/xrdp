@@ -110,6 +110,7 @@ in
             $LIBFREETYPE_DEV:i386 \
             libgl1-mesa-dev:i386 \
             libglu1-mesa-dev:i386 \
+            libegl1-mesa-dev:i386 \
             libjpeg-dev:i386 \
             libimlib2-dev:i386 \
             libmp3lame-dev:i386 \

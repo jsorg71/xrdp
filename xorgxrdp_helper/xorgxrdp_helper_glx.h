@@ -16,18 +16,18 @@
  * limitations under the License.
  */
 
-#ifndef _XORGXRDP_HELPER_NVENC_H
-#define _XORGXRDP_HELPER_NVENC_H
+#ifndef _XORGXRDP_HELPER_GLX_H
+#define _XORGXRDP_HELPER_GLX_H
 
 int
-xorgxrdp_helper_nvenc_init(void);
+xorgxrdp_helper_inf_glx_init(void);
 int
-xorgxrdp_helper_nvenc_create_encoder(int width, int height, int tex,
-                                     int tex_format, struct enc_info **ei);
+xorgxrdp_helper_inf_glx_create_image(Pixmap pixmap, inf_image_t *inf_image);
 int
-xorgxrdp_helper_nvenc_delete_encoder(struct enc_info *ei);
-enum encoder_result
-xorgxrdp_helper_nvenc_encode(struct enc_info *ei, int tex,
-                             void *cdata, int *cdata_bytes);
+xorgxrdp_helper_inf_glx_destroy_image(inf_image_t inf_image);
+int
+xorgxrdp_helper_inf_glx_bind_tex_image(inf_image_t inf_image);
+int
+xorgxrdp_helper_inf_glx_release_tex_image(inf_image_t inf_image);
 
 #endif

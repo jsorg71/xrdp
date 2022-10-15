@@ -1,3 +1,21 @@
+/**
+ * xrdp: A Remote Desktop Protocol server.
+ *
+ * Copyright (C) Jay Sorg 2022
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #if defined(HAVE_CONFIG_H)
 #include <config_ac.h>
 #endif
@@ -9,8 +27,7 @@
 #include <epoxy/gl.h>
 #include <epoxy/egl.h>
 
-//#include "yami_inf.h"
-#include "/opt/yami/include/yami_inf.h"
+#include "encoder_headers/yami_inf.h"
 
 #include "arch.h"
 #include "os_calls.h"
@@ -19,12 +36,13 @@
 #include "xorgxrdp_helper_yami.h"
 #include "log.h"
 
-extern EGLDisplay g_egl_display; /* in xorgxrdp_helper_x11.c */
-extern EGLContext g_egl_context; /* in xorgxrdp_helper_x11.c */
+extern EGLDisplay g_egl_display; /* in xorgxrdp_helper_egl.c */
+extern EGLContext g_egl_context; /* in xorgxrdp_helper_egl.c */
 
-//static char g_lib_name[] = "libyami_inf.so";
 static char g_lib_name[] = "/opt/yami/lib/libyami_inf.so";
+static char g_lib_name1[] = "libyami_inf.so";
 static char g_func_name[] = "yami_get_funcs";
+/* if VA_DRM_DEVICE is not defined */
 static char g_drm_name[] = "/dev/dri/renderD128";
 
 static yami_get_funcs_proc g_yami_get_funcs = NULL;
@@ -50,13 +68,19 @@ xorgxrdp_helper_yami_init(void)
 {
     int error;
     int version;
+    char *drm_dev;
 
     LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_yami_init:");
     g_lib = g_load_library(g_lib_name);
     if (g_lib == 0)
     {
-        LOG(LOG_LEVEL_ERROR, "load library for %s failed", g_lib_name);
-        return 1;
+        g_lib = g_load_library(g_lib_name1);
+        if (g_lib == 0)
+        {
+            LOG(LOG_LEVEL_ERROR, "load library for %s/%s failed",
+                g_lib_name, g_lib_name1);
+            return 1;
+        }
     }
     else
     {
@@ -89,13 +113,18 @@ xorgxrdp_helper_yami_init(void)
         return 1;
     }
     LOG(LOG_LEVEL_INFO, "yami version 0x%8.8x ok", version);
-    g_fd = g_file_open_ex(g_drm_name, 1, 1, 0, 0);
+    drm_dev = getenv("VA_DRM_DEVICE");
+    if (drm_dev == NULL)
+    {
+        drm_dev = g_drm_name;
+    }
+    g_fd = g_file_open_ex(drm_dev, 1, 1, 0, 0);
     if (g_fd == -1)
     {
         LOG(LOG_LEVEL_ERROR, "open %s failed", g_drm_name);
         return 1;
     }
-    LOG(LOG_LEVEL_INFO, "open %s ok, fd %d" g_drm_name, g_fd);
+    LOG(LOG_LEVEL_INFO, "open %s ok, fd %d", g_drm_name, g_fd);
     error = g_enc_funcs.yami_init(YI_TYPE_DRM, (void *) (size_t) g_fd);
     if (error != 0)
     {

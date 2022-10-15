@@ -1,6 +1,8 @@
 AM_CPPFLAGS = \
   -I$(top_srcdir)/common
 
+EXTRA_DIST = xorgxrdp_helper_shaders.c
+
 XRDP_EXTRA_LIBS =
 XRDP_EXTRA_SOURCES =
 
@@ -26,6 +28,10 @@ xorgxrdp_helper_SOURCES = \
   xorgxrdp_helper.h \
   xorgxrdp_helper_x11.c \
   xorgxrdp_helper_x11.h \
+  xorgxrdp_helper_egl.c \
+  xorgxrdp_helper_egl.h \
+  xorgxrdp_helper_glx.c \
+  xorgxrdp_helper_glx.h \
   $(XRDP_EXTRA_SOURCES)
 
 xorgxrdp_helper_LDADD = \
