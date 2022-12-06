@@ -1438,6 +1438,8 @@ libxrdp_drdynvc_open(struct xrdp_session *session, const char *name,
     struct xrdp_sec *sec;
     struct xrdp_channel *chan;
 
+    LOG_DEVEL(LOG_LEVEL_TRACE, "libxrdp_drdynvc_open:");
+
     rdp = (struct xrdp_rdp *) (session->rdp);
     sec = rdp->sec_layer;
     chan = sec->chan_layer;
@@ -1451,6 +1453,8 @@ libxrdp_drdynvc_close(struct xrdp_session *session, int chan_id)
     struct xrdp_rdp *rdp;
     struct xrdp_sec *sec;
     struct xrdp_channel *chan;
+
+    LOG_DEVEL(LOG_LEVEL_TRACE, "libxrdp_drdynvc_close:");
 
     rdp = (struct xrdp_rdp *) (session->rdp);
     sec = rdp->sec_layer;
@@ -1468,6 +1472,8 @@ libxrdp_drdynvc_data_first(struct xrdp_session *session, int chan_id,
     struct xrdp_sec *sec;
     struct xrdp_channel *chan;
 
+    LOG_DEVEL(LOG_LEVEL_TRACE, "libxrdp_drdynvc_data_first:");
+
     rdp = (struct xrdp_rdp *) (session->rdp);
     sec = rdp->sec_layer;
     chan = sec->chan_layer;
@@ -1483,6 +1489,8 @@ libxrdp_drdynvc_data(struct xrdp_session *session, int chan_id,
     struct xrdp_rdp *rdp;
     struct xrdp_sec *sec;
     struct xrdp_channel *chan;
+
+    LOG_DEVEL(LOG_LEVEL_TRACE, "libxrdp_drdynvc_data:");
 
     rdp = (struct xrdp_rdp *) (session->rdp);
     sec = rdp->sec_layer;

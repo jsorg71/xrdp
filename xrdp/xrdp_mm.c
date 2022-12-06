@@ -64,8 +64,6 @@ struct xrdp_mm *
 xrdp_mm_create(struct xrdp_wm *owner)
 {
     struct xrdp_mm *self;
-    char buf[1024];
-    int pid;
 
     self = (struct xrdp_mm *)g_malloc(sizeof(struct xrdp_mm), 1);
     self->wm = owner;
@@ -73,14 +71,6 @@ xrdp_mm_create(struct xrdp_wm *owner)
     self->login_names->auto_free = 1;
     self->login_values = list_create();
     self->login_values->auto_free = 1;
-    self->resize_queue = list_create();
-    self->resize_queue->auto_free = 1;
-
-    pid = g_getpid();
-    /* setup wait objects for signalling */
-    g_snprintf(buf, sizeof(buf), "xrdp_%8.8x_resize_ready", pid);
-    self->resize_ready = g_create_wait_obj(buf);
-    self->resize_data = NULL;
 
     LOG_DEVEL(LOG_LEVEL_INFO, "xrdp_mm_create: bpp %d mcs_connection_type %d "
               "jpeg_codec_id %d v3_codec_id %d rfx_codec_id %d "
@@ -1426,7 +1416,7 @@ dynamic_monitor_data(intptr_t id, int chan_id, char *data, int bytes)
     int monitor_layout_size;
     struct display_size_description *display_size_data;
 
-    LOG(LOG_LEVEL_INFO, "dynamic_monitor_data:");
+    LOG_DEVEL(LOG_LEVEL_TRACE, "dynamic_monitor_data:");
     pro = (struct xrdp_process *) id;
     wm = pro->wm;
 
@@ -1639,7 +1629,8 @@ process_display_control_monitor_layout_data(struct xrdp_wm *wm)
             sec = rdp->sec_layer;
             chan = sec->chan_layer;
 
-            // Continue to check to see if the connection is closed. If it ever is, advance the state machine!
+            // Continue to check to see if the connection is closed. If it
+            // ever is, advance the state machine!
             if (chan->drdynvcs[mm->egfx->channel_id].status
                     == XRDP_DRDYNVC_STATUS_CLOSED
                     || (g_time3() - description->last_state_update_timestamp) > 100)
@@ -1806,7 +1797,7 @@ dynamic_monitor_process_queue(struct xrdp_mm *self)
         return 0;
     }
 
-    if (self->resize_data == NULL)
+    if (self->resize_data == NULL && self->resize_queue != NULL)
     {
         if  (self->resize_queue->count <= 0)
         {
@@ -1874,6 +1865,11 @@ dynamic_monitor_process_queue(struct xrdp_mm *self)
                   " Resize data is not null.");
     }
 
+    if (self->resize_data == NULL)
+    {
+        return 0;
+    }
+
     if (self->resize_data->state == WMRZ_COMPLETE)
     {
         LOG(LOG_LEVEL_INFO, "dynamic_monitor_process_queue: Clearing"
@@ -1908,6 +1904,8 @@ dynamic_monitor_initialize(struct xrdp_mm *self)
     struct xrdp_drdynvc_procs d_procs;
     int flags;
     int error;
+    char buf[1024];
+    int pid;
 
     LOG_DEVEL(LOG_LEVEL_TRACE, "dynamic_monitor_initialize:");
 
@@ -1924,7 +1922,18 @@ dynamic_monitor_initialize(struct xrdp_mm *self)
     if (error != 0)
     {
         LOG_DEVEL(LOG_LEVEL_INFO, "xrdp_mm_drdynvc_up: libxrdp_drdynvc_open failed %d", error);
+        return error;
     }
+
+    // Initialize xrdp_mm specific variables.
+    self->resize_queue = list_create();
+    self->resize_queue->auto_free = 1;
+    pid = g_getpid();
+    /* setup wait objects for signaling */
+    g_snprintf(buf, sizeof(buf), "xrdp_%8.8x_resize_ready", pid);
+    self->resize_ready = g_create_wait_obj(buf);
+    self->resize_data = NULL;
+
     return error;
 }
 
@@ -1954,10 +1963,16 @@ xrdp_mm_drdynvc_up(struct xrdp_mm *self)
         LOG(LOG_LEVEL_INFO, "User has disabled dynamic resizing.");
         return error;
     }
+    error = dynamic_monitor_initialize(self);
+    if (error != 0)
+    {
+        LOG(LOG_LEVEL_INFO, "Dynamic monitor initialize failed."
+            " Client likely does not support it.");
+        return error;
+    }
     ignore_marker = (struct display_control_monitor_layout_data *)
                     g_malloc(sizeof(struct display_control_monitor_layout_data), 1);
     list_add_item(self->resize_queue, (tintptr)ignore_marker);
-    error = dynamic_monitor_initialize(self);
     return error;
 }
 
@@ -2255,7 +2270,7 @@ xrdp_mm_trans_process_drdynvc_data(struct xrdp_mm *self,
     }
     in_uint32_le(s, chansrv_chan_id);
     in_uint32_le(s, data_bytes);
-    if ((!s_check_rem(s, data_bytes)))
+    if (!s_check_rem(s, data_bytes))
     {
         return 1;
     }
