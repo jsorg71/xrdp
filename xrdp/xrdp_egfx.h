@@ -153,35 +153,67 @@ struct stream *
 xrdp_egfx_delete_surface(struct xrdp_egfx_bulk *bulk, int surface_id);
 int
 xrdp_egfx_send_delete_surface(struct xrdp_egfx *egfx, int surface_id);
+struct stream *
+xrdp_egfx_map_surface(struct xrdp_egfx_bulk *bulk, int surface_id,
+                      int x, int y);
 int
 xrdp_egfx_send_map_surface(struct xrdp_egfx *egfx, int surface_id,
                            int x, int y);
+struct stream *
+xrdp_egfx_fill_surface(struct xrdp_egfx_bulk *bulk, int surface_id,
+                       int fill_color, int num_rects,
+                       const struct xrdp_egfx_rect *rects);
 int
 xrdp_egfx_send_fill_surface(struct xrdp_egfx *egfx, int surface_id,
                             int fill_color, int num_rects,
                             const struct xrdp_egfx_rect *rects);
+struct stream *
+xrdp_egfx_surface_to_surface(struct xrdp_egfx_bulk *bulk, int src_surface_id,
+                             int dst_surface_id,
+                             const struct xrdp_egfx_rect *src_rect,
+                             int num_dst_points,
+                             const struct xrdp_egfx_point *dst_points);
 int
 xrdp_egfx_send_surface_to_surface(struct xrdp_egfx *egfx, int src_surface_id,
                                   int dst_surface_id,
                                   const struct xrdp_egfx_rect *src_rect,
                                   int num_dst_points,
                                   const struct xrdp_egfx_point *dst_points);
+struct stream *
+xrdp_egfx_frame_start(struct xrdp_egfx_bulk *bulk, int frame_id, int timestamp);
 int
 xrdp_egfx_send_frame_start(struct xrdp_egfx *egfx, int frame_id, int timestamp);
+struct stream *
+xrdp_egfx_frame_end(struct xrdp_egfx_bulk *bulk, int frame_id);
 int
 xrdp_egfx_send_frame_end(struct xrdp_egfx *egfx, int frame_id);
+struct stream *
+xrdp_egfx_capsconfirm(struct xrdp_egfx_bulk *bulk, int version, int flags);
 int
 xrdp_egfx_send_capsconfirm(struct xrdp_egfx *egfx, int version, int flags);
+struct stream *
+xrdp_egfx_wire_to_surface1(struct xrdp_egfx_bulk *bulk, int surface_id,
+                           int codec_id, int pixel_format,
+                           struct xrdp_egfx_rect *dest_rect,
+                           void *bitmap_data, int bitmap_data_length);
 int
 xrdp_egfx_send_wire_to_surface1(struct xrdp_egfx *egfx, int surface_id,
                                 int codec_id, int pixel_format,
                                 struct xrdp_egfx_rect *dest_rect,
                                 void *bitmap_data, int bitmap_data_length);
+struct stream *
+xrdp_egfx_wire_to_surface2(struct xrdp_egfx_bulk *bulk, int surface_id,
+                           int codec_id, int codec_context_id,
+                           int pixel_format,
+                           void *bitmap_data, int bitmap_data_length);
 int
 xrdp_egfx_send_wire_to_surface2(struct xrdp_egfx *egfx, int surface_id,
                                 int codec_id, int codec_context_id,
                                 int pixel_format,
                                 void *bitmap_data, int bitmap_data_length);
+struct stream *
+xrdp_egfx_reset_graphics(struct xrdp_egfx_bulk *bulk, int width, int height,
+                         int monitor_count, struct monitor_info *mi);
 int
 xrdp_egfx_send_reset_graphics(struct xrdp_egfx *egfx, int width, int height,
                               int monitor_count, struct monitor_info *mi);
