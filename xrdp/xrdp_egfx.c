@@ -36,7 +36,7 @@
 #include <limits.h>
 
 /******************************************************************************/
-static int
+int
 xrdp_egfx_send_data(struct xrdp_egfx *egfx, const char *data, int bytes)
 {
     int error;
@@ -73,15 +73,30 @@ xrdp_egfx_send_data(struct xrdp_egfx *egfx, const char *data, int bytes)
 
 /******************************************************************************/
 int
-xrdp_egfx_send_create_surface(struct xrdp_egfx *egfx, int surface_id,
-                              int width, int height, int pixel_format)
+xrdp_egfx_send_s(struct xrdp_egfx *egfx, struct stream *s)
 {
     int error;
+    int bytes;
+
+    if (s == NULL)
+    {
+        return 1;
+    }
+    bytes = (int) (s->end - s->data);
+    error = xrdp_egfx_send_data(egfx, s->data, bytes);
+    return error;
+}
+
+/******************************************************************************/
+struct stream *
+xrdp_egfx_create_surface(struct xrdp_egfx_bulk *bulk, int surface_id,
+                         int width, int height, int pixel_format)
+{
     int bytes;
     struct stream *s;
     char *holdp;
 
-    LOG(LOG_LEVEL_TRACE, "xrdp_egfx_send_create_surface:");
+    LOG(LOG_LEVEL_TRACE, "xrdp_egfx_create_surface:");
     make_stream(s);
     init_stream(s, 8192);
     /* RDP_SEGMENTED_DATA */
@@ -101,23 +116,34 @@ xrdp_egfx_send_create_surface(struct xrdp_egfx *egfx, int surface_id,
     bytes = (int) ((s->end - holdp) + 4);
     s->p = holdp;
     out_uint32_le(s, bytes);
-    bytes = (int) (s->end - s->data);
-    error = xrdp_egfx_send_data(egfx, s->data, bytes);
-    LOG(LOG_LEVEL_DEBUG, "xrdp_egfx_send_create_surface: xrdp_egfx_send_data error %d", error);
+    return s;
+}
+
+/******************************************************************************/
+int
+xrdp_egfx_send_create_surface(struct xrdp_egfx *egfx, int surface_id,
+                              int width, int height, int pixel_format)
+{
+    int error;
+    struct stream *s;
+
+    LOG(LOG_LEVEL_TRACE, "xrdp_egfx_send_create_surface:");
+    s = xrdp_egfx_create_surface(egfx->bulk, surface_id, width, height,
+                                 pixel_format);
+    error = xrdp_egfx_send_s(egfx, s);
     free_stream(s);
     return error;
 }
 
 /******************************************************************************/
-int
-xrdp_egfx_send_delete_surface(struct xrdp_egfx *egfx, int surface_id)
+struct stream *
+xrdp_egfx_delete_surface(struct xrdp_egfx_bulk *bulk, int surface_id)
 {
-    int error;
     int bytes;
     struct stream *s;
     char *holdp;
 
-    LOG(LOG_LEVEL_TRACE, "xrdp_egfx_send_delete_surface:");
+    LOG(LOG_LEVEL_TRACE, "xrdp_egfx_delete_surface:");
     make_stream(s);
     init_stream(s, 8192);
     /* RDP_SEGMENTED_DATA */
@@ -134,9 +160,19 @@ xrdp_egfx_send_delete_surface(struct xrdp_egfx *egfx, int surface_id)
     bytes = (int) ((s->end - holdp) + 4);
     s->p = holdp;
     out_uint32_le(s, bytes);
-    bytes = (int) (s->end - s->data);
-    error = xrdp_egfx_send_data(egfx, s->data, bytes);
-    LOG(LOG_LEVEL_DEBUG, "xrdp_egfx_send_delete_surface: xrdp_egfx_send_data error %d", error);
+    return s;
+}
+
+/******************************************************************************/
+int
+xrdp_egfx_send_delete_surface(struct xrdp_egfx *egfx, int surface_id)
+{
+    int error;
+    struct stream *s;
+
+    LOG(LOG_LEVEL_TRACE, "xrdp_egfx_send_delete_surface:");
+    s = xrdp_egfx_delete_surface(egfx->bulk, surface_id);
+    error = xrdp_egfx_send_s(egfx, s);
     free_stream(s);
     return error;
 }

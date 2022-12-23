@@ -118,10 +118,21 @@ struct xrdp_egfx
     int frame_id;
     struct stream *s;
     void *user;
+    struct xrdp_egfx_bulk *bulk;
     int (*caps_advertise)(void *user, int num_caps, int *version, int *flags);
     int (*frame_ack)(void *user, uint32_t queue_depth,
                      int frame_id, int frames_decoded);
 };
+
+struct xrdp_egfx_bulk
+{
+    int id;
+};
+
+int
+xrdp_egfx_send_data(struct xrdp_egfx *egfx, const char *data, int bytes);
+int
+xrdp_egfx_send_s(struct xrdp_egfx *egfx, struct stream *s);
 int
 xrdp_egfx_create(struct xrdp_mm *mm, struct xrdp_egfx **egfx);
 int
@@ -132,9 +143,14 @@ int
 xrdp_egfx_shutdown_delete(struct xrdp_egfx *egfx);
 int
 xrdp_egfx_shutdown_full(struct xrdp_egfx *egfx);
+struct stream *
+xrdp_egfx_create_surface(struct xrdp_egfx_bulk *bulk, int surface_id,
+                         int width, int height, int pixel_format);
 int
 xrdp_egfx_send_create_surface(struct xrdp_egfx *egfx, int surface_id,
                               int width, int height, int pixel_format);
+struct stream *
+xrdp_egfx_delete_surface(struct xrdp_egfx_bulk *bulk, int surface_id);
 int
 xrdp_egfx_send_delete_surface(struct xrdp_egfx *egfx, int surface_id);
 int
