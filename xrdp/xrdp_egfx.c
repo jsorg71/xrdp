@@ -557,7 +557,7 @@ xrdp_egfx_wire_to_surface1(struct xrdp_egfx_bulk *bulk, int surface_id,
     out_uint16_le(s, segment_count);
     LOG(LOG_LEVEL_DEBUG, "xrdp_egfx_wire_to_surface1: segment_count %d",
         segment_count);
-    return 0;
+    return s;
 }
 
 /******************************************************************************/
