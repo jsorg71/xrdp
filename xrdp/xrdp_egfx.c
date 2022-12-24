@@ -664,8 +664,8 @@ xrdp_egfx_reset_graphics(struct xrdp_egfx_bulk *bulk, int width, int height,
         return NULL;
     }
     make_stream(s);
-     /* this should always be enough because limited to 16 monitors
-        and message is alwats 340 bytes */
+    /* this should always be enough because limited to 16 monitors
+       and message is alwats 340 bytes */
     init_stream(s, 8192);
     /* RDP_SEGMENTED_DATA */
     out_uint8(s, 0xE0); /* descriptor = SINGLE */
