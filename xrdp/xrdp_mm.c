@@ -1037,7 +1037,8 @@ xrdp_mm_egfx_send_planar_bitmap(struct xrdp_mm *self,
     init_stream(temp_s, GFX_PLANAR_BYTES);
     if (xrdp_egfx_send_frame_start(self->egfx, 1, 0) != 0)
     {
-        LOG(LOG_LEVEL_INFO, "xrdp_mm_egfx_send_planar_bitmap: error");
+        LOG(LOG_LEVEL_INFO, "xrdp_mm_egfx_send_planar_bitmap: "
+            "xrdp_egfx_send_frame_start error");
     }
 
     LOG_DEVEL(LOG_LEVEL_TRACE, "xrdp_mm_egfx_send_planar_bitmap: left %d top %d right %d "
@@ -1068,7 +1069,8 @@ xrdp_mm_egfx_send_planar_bitmap(struct xrdp_mm *self,
             comp_s->p = comp_s->data;
             if (lines != bheight)
             {
-                LOG(LOG_LEVEL_INFO, "xrdp_mm_egfx_send_planar_bitmap: error");
+                LOG(LOG_LEVEL_INFO, "xrdp_mm_egfx_send_planar_bitmap: "
+                    "lines(%d) != bheight(%d) error", lines, bheight);
             }
             else
             {
@@ -1085,14 +1087,16 @@ xrdp_mm_egfx_send_planar_bitmap(struct xrdp_mm *self,
                                                     &gfx_rect, comp_s->data,
                                                     comp_bytes) != 0)
                 {
-                    LOG(LOG_LEVEL_INFO, "xrdp_mm_egfx_send_planar_bitmap: error");
+                    LOG(LOG_LEVEL_INFO, "xrdp_mm_egfx_send_planar_bitmap: "
+                        "xrdp_egfx_send_wire_to_surface1 error");
                 }
             }
         }
     }
     if (xrdp_egfx_send_frame_end(self->egfx, 1) != 0)
     {
-        LOG(LOG_LEVEL_INFO, "xrdp_mm_egfx_send_planar_bitmap: error");
+        LOG(LOG_LEVEL_INFO, "xrdp_mm_egfx_send_planar_bitmap: "
+            "xrdp_egfx_send_frame_end error");
     }
     g_free(pixels);
     free_stream(comp_s);
