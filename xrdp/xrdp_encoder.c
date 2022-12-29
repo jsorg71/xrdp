@@ -47,6 +47,14 @@ static const unsigned char g_rfx_quantization_values[] =
 };
 #endif
 
+struct enc_rect
+{
+    short x1;
+    short y1;
+    short x2;
+    short y2;
+};
+
 /*****************************************************************************/
 static int
 process_enc_jpg(struct xrdp_encoder *self, XRDP_ENC_DATA *enc);
@@ -600,10 +608,16 @@ process_enc_h264(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
     struct stream *s;
     int comp_bytes_pre;
     int enc_done_flags;
+    struct enc_rect rect;
+    int scr_width;
+    int scr_height;
 
     LOG(LOG_LEVEL_DEBUG, "process_enc_x264:");
     LOG(LOG_LEVEL_DEBUG, "process_enc_x264: num_crects %d num_drects %d",
         enc->num_crects, enc->num_drects);
+
+    scr_width = self->mm->wm->screen->width;
+    scr_height = self->mm->wm->screen->height;
 
     fifo_processed = self->fifo_processed;
     mutex = self->mutex;
@@ -641,10 +655,14 @@ process_enc_h264(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
             cx = rrects[index * 4 + 2];
             cy = rrects[index * 4 + 3];
             /* RDPGFX_RECT16 */
-            out_uint16_le(s, x);
-            out_uint16_le(s, y);
-            out_uint16_le(s, x + cx);
-            out_uint16_le(s, y + cy);
+            rect.x1 = MAX(0, x - 1);
+            rect.y1 = MAX(0, y - 1);
+            rect.x2 = MIN(x + cx + 1, scr_width);
+            rect.y2 = MIN(y + cy + 1, scr_height);
+            out_uint16_le(s, rect.x1);
+            out_uint16_le(s, rect.y1);
+            out_uint16_le(s, rect.x2);
+            out_uint16_le(s, rect.y2);
         }
         for (index = 0; index < rcount; index++)
         {
@@ -738,8 +756,8 @@ process_enc_h264(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
     enc_done->comp_pad_data = out_data;
     enc_done->enc = enc;
     enc_done->last = 1;
-    enc_done->cx = self->mm->wm->screen->width;
-    enc_done->cy = self->mm->wm->screen->height;
+    enc_done->cx = scr_width;
+    enc_done->cy = scr_height;
     enc_done->flags = enc_done_flags;
 
     /* done with msg */
