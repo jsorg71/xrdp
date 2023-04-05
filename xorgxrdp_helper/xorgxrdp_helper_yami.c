@@ -268,6 +268,10 @@ xorgxrdp_helper_yami_encode(struct enc_info *ei, int tex,
         eglDestroyImageKHR(g_egl_display, image);
         return 1;
     }
+    else
+    {
+        ei->frameCount++;
+    }
     g_file_close(fd);
     eglDestroyImageKHR(g_egl_display, image);
     return force_key_frame ? KEY_FRAME_ENCODED : INCREMENTAL_FRAME_ENCODED;
