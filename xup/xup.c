@@ -1217,6 +1217,7 @@ process_server_paint_rect_shmem_ex(struct mod *amod, struct stream *s)
     }
     if (bmpdata != 0)
     {
+        //g_memset(bmpdata, 0xFF, 1024 * 32);
         rv = amod->server_paint_rects(amod, num_drects, ldrects,
                                       num_crects, lcrects,
                                       bmpdata, width, height,
@@ -1233,6 +1234,219 @@ process_server_paint_rect_shmem_ex(struct mod *amod, struct stream *s)
     g_free(lcrects);
     g_free(ldrects);
 
+    return rv;
+}
+
+/******************************************************************************/
+/* return error */
+int
+process_server_egfx_shmfd(struct mod *amod, struct stream *s)
+{
+    char *data;
+    char *cmd;
+    int rv;
+    int cmd_bytes;
+    int shmem_bytes;
+    int fd;
+    int recv_bytes;
+    unsigned int num_fds;
+    void *shmem_ptr;
+    char msg[4];
+
+    rv = 0;
+    in_uint32_le(s, cmd_bytes);
+    in_uint8p(s, cmd, cmd_bytes);
+    in_uint32_le(s, shmem_bytes);
+    if (shmem_bytes == 0)
+    {
+        return amod->server_egfx_cmd(amod, cmd, cmd_bytes, NULL, 0);
+    }
+    fd = -1;
+    num_fds = -1;
+    if (g_tcp_can_recv(amod->trans->sck, 5000) == 0)
+    {
+        return 1;
+    }
+    recv_bytes = g_sck_recv_fd_set(amod->trans->sck, msg, 4, &fd, 1, &num_fds);
+    LOG_DEVEL(LOG_LEVEL_DEBUG, "process_server_egfx_shmfd: "
+              "g_sck_recv_fd_set rv %d fd %d", recv_bytes, fd);
+    if (recv_bytes == 4)
+    {
+        if (num_fds == 1)
+        {
+            if (g_file_map(fd, 1, 1, shmem_bytes, &shmem_ptr) == 0)
+            {
+                /* we give up ownership of shmem_ptr
+                   will get cleaned up in server_egfx_cmd or
+                   xrdp_mm_process_enc_done(gfx) */
+                data = (char *) shmem_ptr;
+                rv = amod->server_egfx_cmd(amod, cmd, cmd_bytes,
+                                           data, shmem_bytes);
+            }
+            g_file_close(fd);
+        }
+    }
+    return rv;
+}
+
+/******************************************************************************/
+/* return error */
+static int
+process_server_set_pointer_shmfd(struct mod *amod, struct stream *s)
+{
+    int rv;
+    int x;
+    int y;
+    int bpp;
+    int Bpp;
+    int width;
+    int height;
+    int fd;
+    int recv_bytes;
+    int shmembytes;
+    unsigned int num_fds;
+    void *shmemptr;
+    char *cur_data;
+    char *cur_mask;
+    char msg[4];
+
+    rv = 0;
+    in_sint16_le(s, x);
+    in_sint16_le(s, y);
+    in_uint16_le(s, bpp);
+    in_uint16_le(s, width);
+    in_uint16_le(s, height);
+    fd = -1;
+    num_fds = -1;
+    if (g_tcp_can_recv(amod->trans->sck, 5000) == 0)
+    {
+        return 1;
+    }
+    recv_bytes = g_sck_recv_fd_set(amod->trans->sck, msg, 4, &fd, 1, &num_fds);
+    LOG_DEVEL(LOG_LEVEL_DEBUG, "process_server_set_pointer_shmfd: "
+              "g_sck_recv_fd_set rv %d fd %d", recv_bytes, fd);
+    if (recv_bytes == 4)
+    {
+        if (num_fds == 1)
+        {
+            Bpp = (bpp == 0) ? 3 : (bpp + 7) / 8;
+            shmembytes = width * height * Bpp + width * height / 8;
+            if (g_file_map(fd, 1, 1, shmembytes, &shmemptr) == 0)
+            {
+                cur_data = (char *)shmemptr;
+                cur_mask = cur_data + width * height * Bpp;
+                rv = amod->server_set_pointer_large(amod, x, y,
+                                                    cur_data, cur_mask,
+                                                    bpp, width, height);
+                g_munmap(shmemptr, shmembytes);
+            }
+            g_file_close(fd);
+        }
+    }
+    return rv;
+}
+
+/******************************************************************************/
+/* return error */
+static int
+process_server_paint_rect_shmfd(struct mod *amod, struct stream *s)
+{
+    int num_drects;
+    int num_crects;
+    int flags;
+    int frame_id;
+    int shmem_bytes;
+    int shmem_offset;
+    int left;
+    int top;
+    int width;
+    int height;
+    int twidth;
+    int theight;
+    int index;
+    int rv;
+    int16_t *ldrects;
+    int16_t *ldrects1;
+    int16_t *lcrects;
+    int16_t *lcrects1;
+    char *bmpdata;
+    int fd;
+    int recv_bytes;
+    unsigned int num_fds;
+    void *shmem_ptr;
+    char msg[4];
+
+    /* dirty pixels */
+    in_uint16_le(s, num_drects);
+    ldrects = g_new(int16_t, 2 * 4 * num_drects);
+    ldrects1 = ldrects;
+    for (index = 0; index < num_drects; index++)
+    {
+        in_sint16_le(s, ldrects1[0]);
+        in_sint16_le(s, ldrects1[1]);
+        in_sint16_le(s, ldrects1[2]);
+        in_sint16_le(s, ldrects1[3]);
+        ldrects1 += 4;
+    }
+
+    /* copied pixels */
+    in_uint16_le(s, num_crects);
+    lcrects = g_new(int16_t, 2 * 4 * num_crects);
+    lcrects1 = lcrects;
+    for (index = 0; index < num_crects; index++)
+    {
+        in_sint16_le(s, lcrects1[0]);
+        in_sint16_le(s, lcrects1[1]);
+        in_sint16_le(s, lcrects1[2]);
+        in_sint16_le(s, lcrects1[3]);
+        lcrects1 += 4;
+    }
+
+    in_uint32_le(s, flags);
+    in_uint32_le(s, frame_id);
+    in_uint32_le(s, shmem_bytes);
+    in_uint32_le(s, shmem_offset);
+
+    in_uint16_le(s, left);
+    in_uint16_le(s, top);
+    in_uint16_le(s, width);
+    in_uint16_le(s, height);
+    in_uint16_le(s, twidth);
+    in_uint16_le(s, theight);
+
+    if (g_tcp_can_recv(amod->trans->sck, 5000) == 0)
+    {
+        g_free(ldrects);
+        g_free(lcrects);
+        return 1;
+    }
+    rv = 1;
+    recv_bytes = g_sck_recv_fd_set(amod->trans->sck, msg, 4, &fd, 1, &num_fds);
+    LOG_DEVEL(LOG_LEVEL_DEBUG, "process_server_paint_rect_shmfd: "
+              "g_sck_recv_fd_set rv %d fd %d", recv_bytes, fd);
+    if (recv_bytes == 4)
+    {
+        if (num_fds == 1)
+        {
+            if (g_file_map(fd, 1, 1, shmem_bytes, &shmem_ptr) == 0)
+            {
+                bmpdata = (char *)shmem_ptr;
+                bmpdata += shmem_offset;
+                /* we give up ownership of shmem_ptr
+                   will get cleaned up in server_paint_rects_ex or
+                   xrdp_mm_process_enc_done(rfx) */
+                rv = amod->server_paint_rects_ex(amod, num_drects, ldrects,
+                                                 num_crects, lcrects, bmpdata,
+                                                 left, top, width, height,
+                                                 twidth, theight,
+                                                 flags, frame_id,
+                                                 shmem_ptr, shmem_bytes);
+            }
+            g_file_close(fd);
+        }
+    }
+    g_free(ldrects);
+    g_free(lcrects);
     return rv;
 }
 
@@ -1361,113 +1575,92 @@ lib_send_server_monitor_full_invalidate(struct mod *mod, int width, int height)
 }
 
 /******************************************************************************/
+static int
+ps_noop(struct mod *mod, struct stream *s)
+{
+    (void)mod;
+    (void)s;
+    LOG_DEVEL(LOG_LEVEL_WARNING,
+              "lib_mod_noop: unknown order type");
+    return 0;
+}
+
+/******************************************************************************/
+static int
+process_server_begin_update(struct mod *mod, struct stream *s)
+{
+    (void)s;
+    return mod->server_begin_update(mod);
+}
+
+/******************************************************************************/
+static int
+process_server_end_update(struct mod *mod, struct stream *s)
+{
+    (void)s;
+    return mod->server_end_update(mod);
+}
+
+typedef int (*order_proc)(struct mod *mod, struct stream *s);
+#define LNUM_ORDERS 64
+static order_proc g_orders[LNUM_ORDERS] =
+{
+    process_server_begin_update, /* 1 */
+    process_server_end_update,
+    process_server_fill_rect,
+    process_server_screen_blt,
+    process_server_paint_rect,
+    ps_noop, ps_noop, ps_noop, ps_noop,
+    process_server_set_clip, /* 10 */
+    process_server_reset_clip,
+    process_server_set_fgcolor,
+    process_server_set_bgcolor,
+    process_server_set_opcode,
+    ps_noop, ps_noop,
+    process_server_set_pen,
+    process_server_draw_line,
+    process_server_set_cursor,
+    process_server_create_os_surface, /* 20 */
+    process_server_switch_os_surface,
+    process_server_delete_os_surface,
+    process_server_paint_rect_os,
+    process_server_set_hints,
+    process_server_window_new_update,
+    process_server_window_delete,
+    process_server_window_show,
+    process_server_add_char,
+    process_server_add_char_alpha,
+    process_server_draw_text, /* 30 */
+    process_server_create_os_surface_bpp,
+    process_server_paint_rect_bpp,
+    process_server_composite,
+    ps_noop, ps_noop, ps_noop, ps_noop,
+    ps_noop, ps_noop, ps_noop, ps_noop,
+    ps_noop, ps_noop, ps_noop, ps_noop,
+    ps_noop, ps_noop, ps_noop, ps_noop,
+    ps_noop, /* 50 */
+    process_server_set_pointer_ex,
+    ps_noop, ps_noop, ps_noop, ps_noop,
+    ps_noop, ps_noop, ps_noop, ps_noop,
+    process_server_paint_rect_shmem, /* 60 */
+    process_server_paint_rect_shmem_ex,
+    process_server_egfx_shmfd,
+    process_server_set_pointer_shmfd,
+    process_server_paint_rect_shmfd
+};
+
+/******************************************************************************/
 /* return error */
 static int
 lib_mod_process_orders(struct mod *mod, int type, struct stream *s)
 {
-    int rv;
-
     LOG_DEVEL(LOG_LEVEL_INFO, "lib_mod_process_orders: type %d", type);
-    rv = 0;
-    switch (type)
+    //g_writeln("lib_mod_process_orders: type %d", type);
+    if ((type > 0) && (type <= LNUM_ORDERS))
     {
-        case 1: /* server_begin_update */
-            rv = mod->server_begin_update(mod);
-            break;
-        case 2: /* server_end_update */
-            rv = mod->server_end_update(mod);
-            break;
-        case 3: /* server_fill_rect */
-            rv = process_server_fill_rect(mod, s);
-            break;
-        case 4: /* server_screen_blt */
-            rv = process_server_screen_blt(mod, s);
-            break;
-        case 5: /* server_paint_rect */
-            rv = process_server_paint_rect(mod, s);
-            break;
-        case 10: /* server_set_clip */
-            rv = process_server_set_clip(mod, s);
-            break;
-        case 11: /* server_reset_clip */
-            rv = process_server_reset_clip(mod, s);
-            break;
-        case 12: /* server_set_fgcolor */
-            rv = process_server_set_fgcolor(mod, s);
-            break;
-        case 13: /* server_set_bgcolor */
-            rv = process_server_set_bgcolor(mod, s);
-            break;
-        case 14: /* server_set_opcode */
-            rv =  process_server_set_opcode(mod, s);
-            break;
-        case 17: /* server_set_pen */
-            rv = process_server_set_pen(mod, s);
-            break;
-        case 18: /* server_draw_line */
-            rv = process_server_draw_line(mod, s);
-            break;
-        case 19: /* server_set_cursor */
-            rv = process_server_set_cursor(mod, s);
-            break;
-        case 20: /* server_create_os_surface */
-            rv = process_server_create_os_surface(mod, s);
-            break;
-        case 21: /* server_switch_os_surface */
-            rv = process_server_switch_os_surface(mod, s);
-            break;
-        case 22: /* server_delete_os_surface */
-            rv = process_server_delete_os_surface(mod, s);
-            break;
-        case 23: /* server_paint_rect_os */
-            rv = process_server_paint_rect_os(mod, s);
-            break;
-        case 24: /* server_set_hints */
-            rv = process_server_set_hints(mod, s);
-            break;
-        case 25: /* server_window_new_update */
-            rv = process_server_window_new_update(mod, s);
-            break;
-        case 26: /* server_window_delete */
-            rv = process_server_window_delete(mod, s);
-            break;
-        case 27: /* server_window_new_update - show */
-            rv = process_server_window_show(mod, s);
-            break;
-        case 28: /* server_add_char */
-            rv = process_server_add_char(mod, s);
-            break;
-        case 29: /* server_add_char_alpha */
-            rv = process_server_add_char_alpha(mod, s);
-            break;
-        case 30: /* server_draw_text */
-            rv = process_server_draw_text(mod, s);
-            break;
-        case 31: /* server_create_os_surface_bpp */
-            rv = process_server_create_os_surface_bpp(mod, s);
-            break;
-        case 32: /* server_paint_rect_bpp */
-            rv = process_server_paint_rect_bpp(mod, s);
-            break;
-        case 33: /* server_composite */
-            rv = process_server_composite(mod, s);
-            break;
-        case 51: /* server_set_pointer_ex */
-            rv = process_server_set_pointer_ex(mod, s);
-            break;
-        case 60: /* server_paint_rect_shmem */
-            rv = process_server_paint_rect_shmem(mod, s);
-            break;
-        case 61: /* server_paint_rect_shmem_ex */
-            rv = process_server_paint_rect_shmem_ex(mod, s);
-            break;
-        default:
-            LOG_DEVEL(LOG_LEVEL_WARNING,
-                      "lib_mod_process_orders: unknown order type %d", type);
-            rv = 0;
-            break;
+        return g_orders[type - 1](mod, s);
     }
-    return rv;
+    return ps_noop(mod, s);
 }
 
 /******************************************************************************/

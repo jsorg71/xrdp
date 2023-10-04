@@ -130,10 +130,11 @@ int
 xrdp_wm_pu(struct xrdp_wm *self, struct xrdp_bitmap *control);
 int
 xrdp_wm_send_pointer(struct xrdp_wm *self, int cache_idx,
-                     char *data, char *mask, int x, int y, int bpp);
+                     char *data, char *mask, int x, int y, int bpp,
+                     int width, int height);
 int
 xrdp_wm_pointer(struct xrdp_wm *self, char *data, char *mask, int x, int y,
-                int bpp);
+                int bpp, int width, int height);
 int
 callback(intptr_t id, int msg, intptr_t param1, intptr_t param2,
          intptr_t param3, intptr_t param4);
@@ -493,6 +494,18 @@ int
 server_set_pointer_ex(struct xrdp_mod *mod, int x, int y,
                       char *data, char *mask, int bpp);
 int
+server_set_pointer_large(struct xrdp_mod *mod, int x, int y,
+                         char *data, char *mask, int bpp,
+                         int width, int height);
+int
+server_paint_rects_ex(struct xrdp_mod *mod, int num_drects, short *drects,
+                      int num_crects, short *crects,
+                      char *data, int left, int top,
+                      int width, int height,
+                      int twidth, int theight,
+                      int flags, int frame_id,
+                      void *shmem_ptr, int shmem_bytes);
+int
 server_palette(struct xrdp_mod *mod, int *palette);
 int
 server_msg(struct xrdp_mod *mod, const char *msg, int code);
@@ -588,4 +601,8 @@ server_add_char_alpha(struct xrdp_mod *mod, int font, int character,
                       int width, int height, char *data);
 int
 server_session_info(struct xrdp_mod *mod, const char *data, int data_bytes);
+int
+server_egfx_cmd(struct xrdp_mod *v,
+                char *cmd, int cmd_bytes,
+                char *data, int data_bytes);
 

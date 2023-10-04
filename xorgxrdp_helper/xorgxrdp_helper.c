@@ -36,37 +36,320 @@
 
 #define ARRAYSIZE(x) (sizeof(x)/sizeof(*(x)))
 
+#define GFX_MAP_SIZE 3145728
+
 struct xorgxrdp_info
 {
     struct trans *xorg_trans;
     struct trans *xrdp_trans;
     struct source_info si;
     int resizing;
+    int shmem_fd_ret;
+    int shmem_bytes_ret;
+    int pad0;
 };
 
-static int g_shmem_id_mapped = 0;
-static int g_shmem_id = 0;
-static void *g_shmem_pixels = 0;
 static int g_display_num = 0;
 int xrdp_invalidate = 0;
 
 /*****************************************************************************/
 static int
-xorg_process_message_61(struct xorgxrdp_info *xi, struct stream *s)
+gfx_wiretosurface1(struct xorgxrdp_info *xi, struct stream *s)
+{
+    void *addr;
+    int surface_id;
+    int codec_id;
+    int pixel_format;
+    int flags;
+    int num_rects_c;
+    struct xh_rect *crects;
+    int num_rects_d;
+    int index;
+    int left;
+    int top;
+    int width;
+    int height;
+    int cdata_bytes;
+    int rv;
+    char *flags_pointer;
+    char *final_pointer;
+
+    (void)pixel_format;
+    (void)codec_id;
+    (void)surface_id;
+    (void)rv;
+
+    if (xi->shmem_fd_ret != -1)
+    {
+        LOG(LOG_LEVEL_ERROR, "gfx_wiretosurface1: xi->shmem_fd_ret "
+            "should be -1, it is %d", xi->shmem_fd_ret);
+    }
+    if (g_alloc_shm_map_fd(&addr, &(xi->shmem_fd_ret), GFX_MAP_SIZE) != 0)
+    {
+        return 1;
+    }
+    LOG_DEVEL(LOG_LEVEL_INFO, "gfx_wiretosurface1: addr %p fd %d",
+              addr, xi->shmem_fd_ret);
+
+    if (!s_check_rem(s, 11))
+    {
+        g_munmap(addr, GFX_MAP_SIZE);
+        g_file_close(xi->shmem_fd_ret);
+        xi->shmem_fd_ret = -1;
+        return 1;
+    }
+    in_uint16_le(s, surface_id);
+    in_uint16_le(s, codec_id);
+    in_uint8(s, pixel_format);
+    flags_pointer = s->p;
+    in_uint32_le(s, flags);
+    LOG_DEVEL(LOG_LEVEL_INFO, "gfx_wiretosurface1: surface_id %d codec_id %d "
+              "pixel_format %d flags %d",
+              surface_id, codec_id, pixel_format, flags);
+    in_uint16_le(s, num_rects_d);
+    if ((num_rects_d < 1) || (num_rects_d > 16 * 1024) ||
+            (!s_check_rem(s, num_rects_d * 8)))
+    {
+        g_munmap(addr, GFX_MAP_SIZE);
+        g_file_close(xi->shmem_fd_ret);
+        xi->shmem_fd_ret = -1;
+        return 1;
+    }
+    in_uint8s(s, num_rects_d * 8);
+    if (!s_check_rem(s, 2))
+    {
+        g_munmap(addr, GFX_MAP_SIZE);
+        g_file_close(xi->shmem_fd_ret);
+        xi->shmem_fd_ret = -1;
+        return 1;
+    }
+
+    in_uint16_le(s, num_rects_c);
+    if ((num_rects_c < 1) || (num_rects_c > 16 * 1024) ||
+            (!s_check_rem(s, num_rects_c * 8)))
+    {
+        g_munmap(addr, GFX_MAP_SIZE);
+        g_file_close(xi->shmem_fd_ret);
+        xi->shmem_fd_ret = -1;
+        return 1;
+    }
+    crects = g_new0(struct xh_rect, num_rects_c);
+    if (crects == NULL)
+    {
+        g_munmap(addr, GFX_MAP_SIZE);
+        g_file_close(xi->shmem_fd_ret);
+        xi->shmem_fd_ret = -1;
+        return 1;
+    }
+    for (index = 0; index < num_rects_c; index++)
+    {
+        in_uint16_le(s, crects[index].x);
+        in_uint16_le(s, crects[index].y);
+        in_uint16_le(s, crects[index].w);
+        in_uint16_le(s, crects[index].h);
+    }
+    if (!s_check_rem(s, 8))
+    {
+        g_munmap(addr, GFX_MAP_SIZE);
+        g_file_close(xi->shmem_fd_ret);
+        xi->shmem_fd_ret = -1;
+        g_free(crects);
+        return 1;
+    }
+    in_uint16_le(s, left);
+    in_uint16_le(s, top);
+    in_uint16_le(s, width);
+    in_uint16_le(s, height);
+    final_pointer = s->p;
+
+    cdata_bytes = GFX_MAP_SIZE;
+    rv = xorgxrdp_helper_x11_encode_pixmap(left, top,
+                                           width, height, 0,
+                                           num_rects_c, crects,
+                                           addr, &cdata_bytes);
+    LOG_DEVEL(LOG_LEVEL_INFO, "gfx_wiretosurface1: rv %d cdata_bytes %d",
+              rv, cdata_bytes);
+
+    s->p = flags_pointer;
+    flags |= 1;
+    out_uint32_le(s, flags); /* set already encoded bit */
+    s->p = final_pointer;
+
+    xi->shmem_bytes_ret = cdata_bytes;
+
+    g_free(crects);
+    g_munmap(addr, GFX_MAP_SIZE);
+    /* do not close xi->shmem_fd_ret here, it will get closed after sent */
+
+    return 0;
+}
+
+/*****************************************************************************/
+static int
+xorg_process_message_62(struct xorgxrdp_info *xi, struct stream *s)
+{
+    int recv_bytes;
+    int total_cmd_bytes;
+    int total_shm_bytes;
+    int cmd_bytes;
+    int cmd_id;
+    int fd;
+    unsigned int num_fds;
+    char msg[4];
+    char *total_holdp;
+    char *total_holdend;
+    char *holdp;
+    char *holdend;
+
+    if (!s_check_rem(s, 4))
+    {
+        return 1;
+    }
+    in_uint32_le(s, total_cmd_bytes);
+    LOG_DEVEL(LOG_LEVEL_INFO, "xorg_process_message_62: "
+              "total_cmd_bytes %d",
+              total_cmd_bytes);
+    if ((total_cmd_bytes < 1) || (total_cmd_bytes > 32 * 1024) ||
+            (!s_check_rem(s, total_cmd_bytes)))
+    {
+        return 1;
+    }
+    total_holdp = s->p;
+    total_holdend = s->end;
+    s->end = s->p + total_cmd_bytes;
+    LOG_DEVEL(LOG_LEVEL_INFO, "xorg_process_message_62: "
+              "rem %d",
+              (int)(s->end - s->p));
+    while (s_check_rem(s, 8))
+    {
+        holdp = s->p;
+        in_uint16_le(s, cmd_id);
+        in_uint8s(s, 2); /* flags */
+        in_uint32_le(s, cmd_bytes);
+        LOG_DEVEL(LOG_LEVEL_INFO, "xorg_process_message_62: "
+                  "cmd_id %d cmd_bytes %d",
+                  cmd_id, cmd_bytes);
+        if ((cmd_bytes < 8) || (cmd_bytes > 32 * 1024) ||
+                (!s_check_rem(s, cmd_bytes - 8)))
+        {
+            return 1;
+        }
+        holdend = s->end;
+        s->end = holdp + cmd_bytes;
+        switch (cmd_id)
+        {
+            case 0x0001: /* XR_RDPGFX_CMDID_WIRETOSURFACE_1 */
+                if (gfx_wiretosurface1(xi, s) != 0)
+                {
+                    return 1;
+                }
+                break;
+        }
+        /* setup for next cmd */
+        s->p = holdp + cmd_bytes;
+        s->end = holdend;
+        LOG_DEVEL(LOG_LEVEL_INFO, "xorg_process_message_62: "
+                  "rem %d",
+                  (int)(s->end - s->p));
+    }
+    s->p = total_holdp + total_cmd_bytes;
+    s->end = total_holdend;
+    if (!s_check_rem(s, 4))
+    {
+        return 1;
+    }
+    in_uint32_le(s, total_shm_bytes);
+    s->p -= 4;
+    out_uint32_le(s, xi->shmem_bytes_ret);
+    LOG_DEVEL(LOG_LEVEL_INFO, "xorg_process_message_62: "
+              "total_shm_bytes %d",
+              total_shm_bytes);
+    if (total_shm_bytes < 1)
+    {
+        return 0;
+    }
+    num_fds = 0;
+    if (g_tcp_can_recv(xi->xorg_trans->sck, 5000) == 0)
+    {
+        return 1;
+    }
+    recv_bytes = g_sck_recv_fd_set(xi->xorg_trans->sck, msg, 4,
+                                   &fd, 1, &num_fds);
+    LOG_DEVEL(LOG_LEVEL_INFO, "xorg_process_message_62: "
+              "g_sck_recv_fd_set rv %d fd %d, num_fds %d",
+              recv_bytes, fd, num_fds);
+    if (recv_bytes == 4)
+    {
+        if (num_fds == 1)
+        {
+            g_file_close(fd);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/*****************************************************************************/
+static int
+xorg_process_message_63(struct xorgxrdp_info *xi, struct stream *s)
+{
+    int recv_bytes;
+    unsigned int num_fds;
+    char msg[4];
+
+    if (xi->shmem_fd_ret != -1)
+    {
+        LOG(LOG_LEVEL_ERROR, "xorg_process_message_63: xi->shmem_fd_ret "
+            "should be -1, it is %d", xi->shmem_fd_ret);
+    }
+    num_fds = -1;
+    if (g_tcp_can_recv(xi->xorg_trans->sck, 5000) == 0)
+    {
+        return 1;
+    }
+    recv_bytes = g_sck_recv_fd_set(xi->xorg_trans->sck, msg, 4,
+                                   &(xi->shmem_fd_ret), 1, &num_fds);
+    LOG_DEVEL(LOG_LEVEL_INFO, "xorg_process_message_63: "
+              "g_sck_recv_fd_set rv %d fd %d, num_fds %d",
+              recv_bytes, xi->shmem_fd_ret, num_fds);
+    if (recv_bytes == 4)
+    {
+        if (num_fds == 1)
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/*****************************************************************************/
+static int
+xorg_process_message_64(struct xorgxrdp_info *xi, struct stream *s)
 {
     int num_drects;
     int num_crects;
     int flags;
-    int shmem_id;
+    int shmem_bytes;
     int shmem_offset;
     int frame_id;
+    int left;
+    int top;
     int width;
     int height;
+    int twidth;
+    int theight;
     int cdata_bytes;
     int index;
+    int recv_bytes;
     enum encoder_result rv;
     struct xh_rect *crects;
     char *bmpdata;
+    char msg[4];
+    unsigned int num_fds;
+    void *shmem_ptr;
+
+    (void)twidth;
+    (void)theight;
 
     /* dirty pixels */
     in_uint16_le(s, num_drects);
@@ -83,12 +366,17 @@ xorg_process_message_61(struct xorgxrdp_info *xi, struct stream *s)
     }
     char *flag_pointer = s->p;
     in_uint32_le(s, flags);
+    LOG_DEVEL(LOG_LEVEL_INFO, "xorg_process_message_64: flags 0x%8.8X", flags);
     in_uint32_le(s, frame_id);
-    in_uint32_le(s, shmem_id);
+    in_uint32_le(s, shmem_bytes);
     in_uint32_le(s, shmem_offset);
 
+    in_uint16_le(s, left);
+    in_uint16_le(s, top);
     in_uint16_le(s, width);
     in_uint16_le(s, height);
+    in_uint16_le(s, twidth);
+    in_uint16_le(s, theight);
     char *final_pointer = s->p;
 
     if (xi->resizing == 3)
@@ -111,62 +399,78 @@ xorg_process_message_61(struct xorgxrdp_info *xi, struct stream *s)
         return 0;
     }
 
-    bmpdata = NULL;
-    if (g_shmem_id_mapped == 0)
+    if (xi->shmem_fd_ret != -1)
     {
-        g_shmem_id = shmem_id;
-        g_shmem_pixels = (char *) g_shmat(g_shmem_id);
-        if (g_shmem_pixels == (void *) -1)
+        LOG(LOG_LEVEL_ERROR, "xorg_process_message_64: xi->shmem_fd_ret "
+            "should be -1, it is %d", xi->shmem_fd_ret);
+    }
+
+    num_fds = -1;
+    if (g_tcp_can_recv(xi->xorg_trans->sck, 5000) == 0)
+    {
+        g_free(crects);
+        return 1;
+    }
+    recv_bytes = g_sck_recv_fd_set(xi->xorg_trans->sck, msg, 4,
+                                   &(xi->shmem_fd_ret), 1, &num_fds);
+    LOG_DEVEL(LOG_LEVEL_INFO, "xorg_process_message_64: "
+              "g_sck_recv_fd_set rv %d fd %d, num_fds %d",
+              recv_bytes, xi->shmem_fd_ret, num_fds);
+
+    shmem_ptr = NULL;
+    if (recv_bytes == 4)
+    {
+        if (num_fds == 1)
         {
-            /* failed */
-            g_shmem_id = 0;
-            g_shmem_pixels = NULL;
-            g_shmem_id_mapped = 0;
+            if (g_file_map(xi->shmem_fd_ret, 1, 1, shmem_bytes,
+                           &shmem_ptr) == 0)
+            {
+                bmpdata = (char *)shmem_ptr;
+                bmpdata += shmem_offset;
+
+                if ((bmpdata != NULL) && (flags & 1))
+                {
+                    cdata_bytes = 16 * 1024 * 1024;
+                    rv = xorgxrdp_helper_x11_encode_pixmap(left, top,
+                                                           width, height,
+                                                           (flags >> 28) & 0xF,
+                                                           num_crects, crects,
+                                                           bmpdata + 4,
+                                                           &cdata_bytes);
+                    if (rv == ENCODER_ERROR)
+                    {
+                        LOG(LOG_LEVEL_ERROR, "error %d", rv);
+                    }
+                    if (rv == KEY_FRAME_ENCODED)
+                    {
+                        s->p = flag_pointer;
+                        out_uint32_le(s, flags | 1 | 2);
+                        s->p = final_pointer;
+                    }
+
+                    bmpdata[0] = cdata_bytes;
+                    bmpdata[1] = cdata_bytes >> 8;
+                    bmpdata[2] = cdata_bytes >> 16;
+                    bmpdata[3] = cdata_bytes >> 24;
+                    LOG_DEVEL(LOG_LEVEL_INFO, "cdata_bytes %d", cdata_bytes);
+                }
+            }
         }
         else
         {
-            g_shmem_id_mapped = 1;
+            LOG(LOG_LEVEL_INFO,
+                "xorg_process_message_64: num_fds %d", num_fds);
         }
     }
-    else if (g_shmem_id != shmem_id)
+    else
     {
-        g_shmem_id = shmem_id;
-        g_shmdt(g_shmem_pixels);
-        g_shmem_pixels = (char *) g_shmat(g_shmem_id);
-        if (g_shmem_pixels == (void *) -1)
-        {
-            /* failed */
-            g_shmem_id = 0;
-            g_shmem_pixels = NULL;
-            g_shmem_id_mapped = 0;
-        }
+        LOG(LOG_LEVEL_INFO,
+            "xorg_process_message_64: recv_bytes %d", recv_bytes);
     }
-    if (g_shmem_pixels != NULL)
-    {
-        bmpdata = (char *)g_shmem_pixels + shmem_offset;
-    }
-    if ((bmpdata != NULL) && (flags & 1))
-    {
-        cdata_bytes = 16 * 1024 * 1024;
-        rv = xorgxrdp_helper_x11_encode_pixmap(width, height, 0,
-                                               num_crects, crects,
-                                               bmpdata + 4, &cdata_bytes);
-        if (rv == ENCODER_ERROR)
-        {
-            LOG(LOG_LEVEL_ERROR, "error %d", rv);
-        }
-        if (rv == KEY_FRAME_ENCODED)
-        {
-            s->p = flag_pointer;
-            out_uint32_le(s, 1 | 2);
-            s->p = final_pointer;
-        }
 
-        bmpdata[0] = cdata_bytes;
-        bmpdata[1] = cdata_bytes >> 8;
-        bmpdata[2] = cdata_bytes >> 16;
-        bmpdata[3] = cdata_bytes >> 24;
-        LOG_DEVEL(LOG_LEVEL_INFO, "cdata_bytes %d", cdata_bytes);
+    if (shmem_ptr != NULL)
+    {
+        g_munmap(shmem_ptr, shmem_bytes);
     }
     g_free(crects);
     return 0;
@@ -187,7 +491,9 @@ xorg_process_message(struct xorgxrdp_info *xi, struct stream *s)
     int magic;
     int con_id;
     int mon_id;
+    int ret;
 
+    xi->shmem_fd_ret = -1;
     in_uint16_le(s, type);
     in_uint16_le(s, num);
     in_uint32_le(s, size);
@@ -200,8 +506,26 @@ xorg_process_message(struct xorgxrdp_info *xi, struct stream *s)
             in_uint16_le(s, size);
             switch (type)
             {
-                case 61:
-                    xorg_process_message_61(xi, s);
+                case 62:
+                    /* process_server_egfx_shmfd */
+                    if (xorg_process_message_62(xi, s) != 0)
+                    {
+                        return 1;
+                    }
+                    break;
+                case 63:
+                    /* process_server_set_pointer_shmfd */
+                    if (xorg_process_message_63(xi, s) != 0)
+                    {
+                        return 1;
+                    }
+                    break;
+                case 64:
+                    /* process_server_paint_rect_shmfd */
+                    if (xorg_process_message_64(xi, s) != 0)
+                    {
+                        return 1;
+                    }
                     break;
             }
             s->p = phold + size;
@@ -248,7 +572,26 @@ xorg_process_message(struct xorgxrdp_info *xi, struct stream *s)
         }
     }
     s->p = s->data;
-    return trans_write_copy_s(xi->xrdp_trans, s);
+
+    if (xi->shmem_fd_ret == -1)
+    {
+        // Using system-v or no shared memory
+        ret = trans_write_copy_s(xi->xrdp_trans, s);
+        return ret;
+    }
+    // Using posix shared memory
+    ret = trans_force_write_s(xi->xrdp_trans, s);
+    if (ret)
+    {
+        return ret;
+    }
+    ret = g_sck_send_fd_set(xi->xrdp_trans->sck, "int", 4,
+                            &(xi->shmem_fd_ret), 1);
+    if (ret < 0)
+    {
+        return 1;
+    }
+    return g_file_close(xi->shmem_fd_ret);
 }
 
 /*****************************************************************************/

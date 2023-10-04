@@ -52,6 +52,10 @@
 #include <sys/stat.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#if defined(HAVE_SYS_PRCTL_H)
+#include <sys/prctl.h>
+#endif
+#include <sys/mman.h>
 #include <dlfcn.h>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -60,6 +64,7 @@
 #include <pwd.h>
 #include <time.h>
 #include <grp.h>
+#include <poll.h>
 #endif
 
 #include <stdlib.h>
@@ -1426,6 +1431,178 @@ g_sck_send(int sck, const void *ptr, int len, int flags)
 }
 
 /*****************************************************************************/
+int
+g_sck_recv_fd_set(int sck, void *ptr, unsigned int len,
+                  int fds[], unsigned int maxfd,
+                  unsigned int *fdcount)
+{
+    int rv = -1;
+#if !defined(_WIN32)
+    // The POSIX API gives us no way to see how much ancillary data is
+    // present for recvmsg() - just use a big buffer.
+    //
+    // Use a union, so control_un.control is properly aligned.
+    union
+    {
+        struct cmsghdr cm;
+        unsigned char control[8192];
+    } control_un;
+    struct msghdr msg = {0};
+
+    *fdcount = 0;
+
+    /* Set up descriptor for vanilla data */
+    struct iovec iov[1] = { {ptr, len} };
+    msg.msg_iov = &iov[0];
+    msg.msg_iovlen = 1;
+
+    /* Add in the ancillary data buffer */
+    msg.msg_control = control_un.control;
+    msg.msg_controllen = sizeof(control_un.control);
+
+    if ((rv = recvmsg(sck, &msg, 0)) > 0)
+    {
+        struct cmsghdr *cmsg;
+        if ((msg.msg_flags & MSG_CTRUNC) != 0)
+        {
+            LOG(LOG_LEVEL_WARNING, "Ancillary data on recvmsg() was truncated");
+        }
+
+        // Iterate over the cmsghdr structures in the ancillary data
+        for (cmsg = CMSG_FIRSTHDR(&msg);
+                cmsg != NULL;
+                cmsg = CMSG_NXTHDR(&msg, cmsg))
+        {
+            if (cmsg->cmsg_level == SOL_SOCKET &&
+                    cmsg->cmsg_type == SCM_RIGHTS)
+            {
+                const unsigned char *data = CMSG_DATA(cmsg);
+                unsigned int data_len = cmsg->cmsg_len - CMSG_LEN(0);
+
+                // Check the data length doesn't point past the end of
+                // control_un.control (see below). This shouldn't happen,
+                // but is conceivable if the ancillary data is truncated
+                // and the OS doesn't handle that properly.
+                //
+                // <--  (sizeof(control_un.control)   -->
+                // +------------------------------------+
+                // |                                    |
+                // +------------------------------------+
+                // ^                       ^
+                // |                       | <- data_len ->
+                // |                       |
+                // control_un.control      data
+                unsigned int max_data_len =
+                    sizeof(control_un.control) - (data - control_un.control);
+                if (len > max_data_len)
+                {
+                    len = max_data_len;
+                }
+
+                // Process all the file descriptors in the structure
+                while (data_len >= sizeof(int))
+                {
+                    int fd;
+                    memcpy(&fd, data, sizeof(int));
+                    data += sizeof(int);
+                    data_len -= sizeof(int);
+
+                    if (*fdcount < maxfd)
+                    {
+                        fds[(*fdcount)++] = fd;
+                    }
+                    else
+                    {
+                        // No room in the user's buffer for this fd
+                        close(fd);
+                    }
+                }
+            }
+        }
+    }
+#endif /* !WIN32 */
+
+    return rv;
+}
+
+/*****************************************************************************/
+int
+g_sck_send_fd_set(int sck, const void *ptr, unsigned int len,
+                  int fds[], unsigned int fdcount)
+{
+    int rv = -1;
+#if !defined(_WIN32)
+    struct msghdr msg = {0};
+
+    /* Set up descriptor for vanilla data */
+    struct iovec iov[1] = { {(void *)ptr, len} };
+    msg.msg_iov = &iov[0];
+    msg.msg_iovlen = 1;
+
+    if (fdcount > 0)
+    {
+        unsigned int fdsize = sizeof(fds[0]) * fdcount; /* Payload size */
+        /* Allocate ancillary data structure */
+        msg.msg_controllen  = CMSG_SPACE(fdsize);
+        msg.msg_control = (struct cmsghdr *)g_malloc(msg.msg_controllen, 1);
+        if (msg.msg_control == NULL)
+        {
+            /* Memory allocation failure */
+            LOG(LOG_LEVEL_ERROR, "Error allocating buffer for %u fds",
+                fdcount);
+            return -1;
+        }
+
+        /* Fill in the ancillary data structure */
+        struct cmsghdr *cmptr = CMSG_FIRSTHDR(&msg);
+        cmptr->cmsg_len = CMSG_LEN(fdsize);
+        cmptr->cmsg_level = SOL_SOCKET;
+        cmptr->cmsg_type = SCM_RIGHTS;
+        memcpy(CMSG_DATA(cmptr), fds, fdsize);
+    }
+
+    rv = sendmsg(sck, &msg, 0);
+    g_free(msg.msg_control);
+
+#endif /* !WIN32 */
+
+    return rv;
+}
+
+/******************************************************************************/
+int
+g_alloc_shm_map_fd(void **addr, int *fd, size_t size)
+{
+    int lfd = -1;
+    void *laddr;
+    char name[128];
+    static unsigned int autoinc;
+
+    snprintf(name, 128, "/%8.8X%8.8X", getpid(), autoinc++);
+    lfd = shm_open(name, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    if (lfd == -1)
+    {
+        return 1;
+    }
+    shm_unlink(name);
+    if (ftruncate(lfd, size) == -1)
+    {
+        close(lfd);
+        return 2;
+    }
+    /* map fd to address space */
+    laddr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, lfd, 0);
+    if (laddr == MAP_FAILED)
+    {
+        close(lfd);
+        return 3;
+    }
+    *addr = laddr;
+    *fd = lfd;
+    return 0;
+}
+
+/*****************************************************************************/
 /* returns boolean */
 int
 g_sck_socket_ok(int sck)
@@ -2187,6 +2364,130 @@ g_file_lock(int fd, int start, int len)
 
     return 1;
 #endif
+}
+
+/*****************************************************************************/
+/* Gets the close-on-exec flag for a file descriptor */
+int
+g_file_get_cloexec(int fd)
+{
+    int rv = 0;
+    int flags = fcntl(fd, F_GETFD);
+    if (flags >= 0 && (flags & FD_CLOEXEC) != 0)
+    {
+        rv = 1;
+    }
+
+    return rv;
+}
+
+/*****************************************************************************/
+/* Sets/clears the close-on-exec flag for a file descriptor */
+/* return boolean */
+int
+g_file_set_cloexec(int fd, int status)
+{
+    int rv = 0;
+    int current_flags = fcntl(fd, F_GETFD);
+    if (current_flags >= 0)
+    {
+        int new_flags;
+        if (status)
+        {
+            new_flags = current_flags | FD_CLOEXEC;
+        }
+        else
+        {
+            new_flags = current_flags & ~FD_CLOEXEC;
+        }
+        if (new_flags != current_flags)
+        {
+            rv = (fcntl(fd, F_SETFD, new_flags) >= 0);
+        }
+    }
+
+    return rv;
+}
+
+/*****************************************************************************/
+struct list *
+g_get_open_fds(int min, int max)
+{
+    struct list *result = list_create();
+
+    if (result != NULL)
+    {
+        if (max < 0)
+        {
+            max = sysconf(_SC_OPEN_MAX);
+        }
+
+        if (max > min)
+        {
+            struct pollfd *fds = g_new0(struct pollfd, max - min);
+            int i;
+
+            if (fds == NULL)
+            {
+                goto nomem;
+            }
+
+            for (i = min ; i < max ; ++i)
+            {
+                fds[i - min].fd = i;
+            }
+
+            if (poll(fds, max - min, 0) >= 0)
+            {
+                for (i = min ; i < max ; ++i)
+                {
+                    if (fds[i - min].revents != POLLNVAL)
+                    {
+                        // Descriptor is open
+                        list_add_item(result, i);
+                    }
+                }
+            }
+            g_free(fds);
+        }
+    }
+
+    return result;
+
+nomem:
+    list_delete(result);
+    return NULL;
+}
+
+/*****************************************************************************/
+int
+g_file_map(int fd, int aread, int awrite, size_t length, void **addr)
+{
+    int prot = 0;
+    void *laddr;
+
+    if (aread)
+    {
+        prot |= PROT_READ;
+    }
+    if (awrite)
+    {
+        prot |= PROT_WRITE;
+    }
+    laddr = mmap(NULL, length, prot, MAP_SHARED, fd, 0);
+    if (laddr == MAP_FAILED)
+    {
+        return 1;
+    }
+    *addr = laddr;
+    return 0;
+}
+
+/*****************************************************************************/
+int
+g_munmap(void *addr, size_t length)
+{
+    return munmap(addr, length);
 }
 
 /*****************************************************************************/
@@ -3610,4 +3911,12 @@ g_tcp6_bind_address(int sck, const char *port, const char *address)
 #else
     return -1;
 #endif
+}
+
+/*****************************************************************************/
+void
+g_qsort(void *base, size_t nitems, size_t size,
+        int (*compar)(const void *, const void *))
+{
+    qsort(base, nitems, size, compar);
 }

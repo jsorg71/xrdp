@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Yami Encoder
+ * libx264 Encoder
  */
 
 #ifndef _XRDP_ENCODER_X264_H
@@ -28,9 +28,11 @@ xrdp_encoder_x264_create(void);
 int
 xrdp_encoder_x264_delete(void *handle);
 int
-xrdp_encoder_x264_encode(void *handle, int session,
-                         int width, int height, int format, const char *data,
-                         char *cdata, int *cdata_bytes);
+xrdp_encoder_x264_encode(void *handle, int session, int left, int top,
+                         int width, int height, int twidth, int theight,
+                         int format, const char *data,
+                         short *crects, int num_crects,
+                         char *cdata, int *cdata_bytes, int *flags_ptr);
 
 #endif
 

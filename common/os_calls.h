@@ -88,6 +88,43 @@ int      g_sck_listen(int sck);
 int      g_sck_accept(int sck);
 int      g_sck_recv(int sck, void *ptr, int len, int flags);
 int      g_sck_send(int sck, const void *ptr, int len, int flags);
+/**
+ * Receives data and file descriptors on a unix domain socket
+ *
+ * @param sck - Socket to receive data + file descriptors from
+ * @param ptr - Pointer to buffer for incoming data
+ * @param len - Length of data. Must be > 0
+ * @param[out] fds - Array of file descriptors
+ * @param [in] maxfd - Max number of elements in fds
+ * @param[out] fdcount - Actual number of file descriptors received
+ * @return Bytes received, or < 0 for error.
+ *
+ * If the result is > 0 but less than len, the file descriptors have
+ * been received. Get the rest of the data with normal g_sck_recv() calls.
+ *
+ * fdcount may be more that maxfd. This indicates that more file descriptors
+ * were received than there was space for. The excess file descriptors
+ * are closed and discarded.
+ */
+int      g_sck_recv_fd_set(int sck, void *ptr, unsigned int len,
+                           int fds[], unsigned int maxfd,
+                           unsigned int *fdcount);
+/**
+ * Sends data and file descriptors on a unix domain socket
+ *
+ * @param sck - Socket to send data + file descriptors on
+ * @param ptr - Data to send
+ * @param len - Length of data. Must be > 0
+ * @param fds - Array of file descriptors
+ * @param fdcount - Number of file descriptors
+ * @return Bytes sent, or < 0 for error.
+ *
+ * If the result is > 0 but less than len, the file descriptors have
+ * been sent. Send the rest of the data with normal g_sck_send() calls.
+ */
+int      g_sck_send_fd_set(int sck, const void *ptr, unsigned int len,
+                           int fds[], unsigned int fdcount);
+int      g_alloc_shm_map_fd(void **addr, int *fd, size_t size);
 int      g_sck_last_error_would_block(int sck);
 int      g_sck_socket_ok(int sck);
 int      g_sck_can_send(int sck, int millis);
@@ -143,6 +180,23 @@ int      g_file_read(int fd, char *ptr, int len);
 int      g_file_write(int fd, const char *ptr, int len);
 int      g_file_seek(int fd, int offset);
 int      g_file_lock(int fd, int start, int len);
+int
+g_file_map(int fd, int aread, int awrite, size_t length, void **addr);
+int
+g_munmap(void *addr, size_t length);
+int      g_file_duplicate_on(int fd, int target_fd);
+int      g_file_get_cloexec(int fd);
+int      g_file_set_cloexec(int fd, int status);
+/**
+ * Get a list of open file descriptors
+ *
+ * @param min Min FD to consider
+ * @param max Max FD to consider (+1), or -1 for no limit
+ * @result Array of file descriptors, in ascending order.
+ *
+ * Call delete_list() on the result when you've finished with it.
+ */
+struct list *g_get_open_fds(int min, int max);
 int      g_chmod_hex(const char *filename, int flags);
 int      g_umask_hex(int flags);
 int      g_chown(const char *name, int uid, int gid);
@@ -210,6 +264,9 @@ int      g_tcp4_socket(void);
 int      g_tcp4_bind_address(int sck, const char *port, const char *address);
 int      g_tcp6_socket(void);
 int      g_tcp6_bind_address(int sck, const char *port, const char *address);
+void
+g_qsort(void *base, size_t nitems, size_t size,
+        int (*compar)(const void *, const void *));
 
 /* glib-style wrappers */
 #define g_new(struct_type, n_structs) \

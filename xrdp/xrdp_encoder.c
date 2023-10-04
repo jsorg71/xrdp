@@ -27,6 +27,7 @@
 #include "ms-rdpbcgr.h"
 #include "thread_calls.h"
 #include "fifo.h"
+#include "xrdp_egfx.h"
 
 #ifdef XRDP_RFXCODEC
 #include "rfxcodec_encode.h"
@@ -64,6 +65,8 @@ process_enc_rfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc);
 #endif
 static int
 process_enc_h264(struct xrdp_encoder *self, XRDP_ENC_DATA *enc);
+static int
+process_enc_egfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc);
 
 /*****************************************************************************/
 struct xrdp_encoder *
@@ -103,16 +106,16 @@ xrdp_encoder_create(struct xrdp_mm *mm)
         LOG(LOG_LEVEL_INFO,
             "xrdp_encoder_create: starting h264 codec session gfx");
         self->in_codec_mode = 1;
-        client_info->capture_code = 3;
+        client_info->capture_code = 5;
         client_info->capture_format =
             /* XRDP_yuv444_709fr */
             //(32 << 24) | (67 << 16) | (0 << 12) | (0 << 8) | (0 << 4) | 0;
             /* XRDP_nv12_709fr */
             (12 << 24) | (66 << 16) | (0 << 12) | (0 << 8) | (0 << 4) | 0;
-        self->process_enc = process_enc_h264;
+        self->process_enc = process_enc_egfx;
         self->gfx = 1;
 #if defined(XRDP_X264)
-        self->codec_handle = xrdp_encoder_x264_create();
+        self->codec_handle_gfx[1] = xrdp_encoder_x264_create();
 #endif
     }
 #ifdef XRDP_RFXCODEC
@@ -121,19 +124,19 @@ xrdp_encoder_create(struct xrdp_mm *mm)
         LOG(LOG_LEVEL_INFO,
             "xrdp_encoder_create: starting gfx rfx pro codec session");
         self->in_codec_mode = 1;
-        client_info->capture_code = 2;
-        self->process_enc = process_enc_rfx;
+        client_info->capture_code = 4;
+        self->process_enc = process_enc_egfx;
         self->gfx = 1;
         self->quants = (const char *) g_rfx_quantization_values;
         self->num_quants = 2;
         self->quant_idx_y = 0;
         self->quant_idx_u = 1;
         self->quant_idx_v = 1;
-        self->codec_handle = rfxcodec_encode_create(
-                                 mm->wm->screen->width,
-                                 mm->wm->screen->height,
-                                 RFX_FORMAT_YUV,
-                                 RFX_FLAGS_RLGR1 | RFX_FLAGS_PRO1);
+        self->codec_handle_gfx[0] = rfxcodec_encode_create(
+                                        mm->wm->screen->width,
+                                        mm->wm->screen->height,
+                                        RFX_FORMAT_YUV,
+                                        RFX_FLAGS_RLGR1 | RFX_FLAGS_PRO1);
     }
 
     else if (client_info->rfx_codec_id != 0)
@@ -144,9 +147,10 @@ xrdp_encoder_create(struct xrdp_mm *mm)
         self->in_codec_mode = 1;
         client_info->capture_code = 2;
         self->process_enc = process_enc_rfx;
-        self->codec_handle = rfxcodec_encode_create(mm->wm->screen->width,
-                             mm->wm->screen->height,
-                             RFX_FORMAT_YUV, 0);
+        self->codec_handle_rfx = rfxcodec_encode_create(
+                                     mm->wm->screen->width,
+                                     mm->wm->screen->height,
+                                     RFX_FORMAT_YUV, 0);
     }
 #endif
     else if (client_info->jpeg_codec_id != 0)
@@ -176,7 +180,7 @@ xrdp_encoder_create(struct xrdp_mm *mm)
         //(32 << 24) | (67 << 16) | (0 << 12) | (0 << 8) | (0 << 4) | 0;
         self->process_enc = process_enc_h264;
 #if defined(XRDP_X264)
-        self->codec_handle = xrdp_encoder_x264_create();
+        self->codec_handle_h264 = xrdp_encoder_x264_create();
 #endif
     }
     else
@@ -242,21 +246,25 @@ xrdp_encoder_delete(struct xrdp_encoder *self)
     g_set_wait_obj(self->xrdp_encoder_term);
     g_sleep(1000);
 
-    /* todo delete specific encoder */
-
-    if (self->process_enc == process_enc_jpg)
-    {
-    }
 #ifdef XRDP_RFXCODEC
-    else if (self->process_enc == process_enc_rfx)
+    if (self->codec_handle_gfx[0] != NULL)
     {
-        rfxcodec_encode_destroy(self->codec_handle);
+        rfxcodec_encode_destroy(self->codec_handle_gfx[0]);
+    }
+    if (self->codec_handle_rfx != NULL)
+    {
+        rfxcodec_encode_destroy(self->codec_handle_rfx);
     }
 #endif
+
 #if defined(XRDP_X264)
-    else if (self->process_enc == process_enc_h264)
+    if (self->codec_handle_gfx[1] != NULL)
     {
-        xrdp_encoder_x264_delete(self->codec_handle);
+        xrdp_encoder_x264_delete(self->codec_handle_gfx[1]);
+    }
+    if (self->codec_handle_h264 != NULL)
+    {
+        xrdp_encoder_x264_delete(self->codec_handle_h264);
     }
 #endif
     /* destroy wait objects used for signalling */
@@ -275,8 +283,15 @@ xrdp_encoder_delete(struct xrdp_encoder *self)
             {
                 continue;
             }
-            g_free(enc->drects);
-            g_free(enc->crects);
+            if (ENC_IS_BIT_SET(enc->flags, ENC_FLAGS_GFX_BIT))
+            {
+                g_free(enc->u.gfx.cmd);
+            }
+            else
+            {
+                g_free(enc->u.sc.drects);
+                g_free(enc->u.sc.crects);
+            }
             g_free(enc);
         }
         fifo_delete(fifo);
@@ -327,13 +342,13 @@ process_enc_jpg(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
     fifo_processed = self->fifo_processed;
     mutex = self->mutex;
     event_processed = self->xrdp_encoder_event_processed;
-    count = enc->num_crects;
+    count = enc->u.sc.num_crects;
     for (index = 0; index < count; index++)
     {
-        x = enc->crects[index * 4 + 0];
-        y = enc->crects[index * 4 + 1];
-        cx = enc->crects[index * 4 + 2];
-        cy = enc->crects[index * 4 + 3];
+        x = enc->u.sc.crects[index * 4 + 0];
+        y = enc->u.sc.crects[index * 4 + 1];
+        cx = enc->u.sc.crects[index * 4 + 2];
+        cy = enc->u.sc.crects[index * 4 + 3];
         if (cx < 1 || cy < 1)
         {
             LOG_DEVEL(LOG_LEVEL_WARNING, "process_enc_jpg: error 1");
@@ -357,9 +372,9 @@ process_enc_jpg(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
 
         out_data[256] = 0; /* header bytes */
         out_data[257] = 0;
-        error = libxrdp_codec_jpeg_compress(self->mm->wm->session, 0, enc->data,
-                                            enc->width, enc->height,
-                                            enc->width * 4, x, y, cx, cy,
+        error = libxrdp_codec_jpeg_compress(self->mm->wm->session, 0, enc->u.sc.data,
+                                            enc->u.sc.width, enc->u.sc.height,
+                                            enc->u.sc.width * 4, x, y, cx, cy,
                                             quality,
                                             out_data + 256 + 2,
                                             &out_data_bytes);
@@ -383,11 +398,12 @@ process_enc_jpg(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
         enc_done->pad_bytes = 256;
         enc_done->comp_pad_data = out_data;
         enc_done->enc = enc;
-        enc_done->last = index == (enc->num_crects - 1);
+        enc_done->last = index == (enc->u.sc.num_crects - 1);
         enc_done->x = x;
         enc_done->y = y;
         enc_done->cx = cx;
         enc_done->cy = cy;
+        enc_done->frame_id = enc->u.sc.frame_id;
         /* done with msg */
         /* inform main thread done */
         tc_mutex_lock(mutex);
@@ -427,7 +443,7 @@ process_enc_rfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
 
     LOG_DEVEL(LOG_LEVEL_DEBUG, "process_enc_rfx:");
     LOG_DEVEL(LOG_LEVEL_DEBUG, "process_enc_rfx: num_crects %d num_drects %d",
-              enc->num_crects, enc->num_drects);
+              enc->u.sc.num_crects, enc->u.sc.num_drects);
     fifo_processed = self->fifo_processed;
     mutex = self->mutex;
     event_processed = self->xrdp_encoder_event_processed;
@@ -436,16 +452,16 @@ process_enc_rfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
     do
     {
         tiles_written = 0;
-        tiles_left = enc->num_crects - all_tiles_written;
+        tiles_left = enc->u.sc.num_crects - all_tiles_written;
         out_data = NULL;
         out_data_bytes = 0;
 
-        if ((tiles_left > 0) && (enc->num_drects > 0))
+        if ((tiles_left > 0) && (enc->u.sc.num_drects > 0))
         {
             alloc_bytes = XRDP_SURCMD_PREFIX_BYTES;
             alloc_bytes += self->max_compressed_bytes;
             alloc_bytes += sizeof(struct rfx_tile) * tiles_left +
-                           sizeof(struct rfx_rect) * enc->num_drects;
+                           sizeof(struct rfx_rect) * enc->u.sc.num_drects;
             out_data = g_new(char, alloc_bytes);
             if (out_data != NULL)
             {
@@ -457,10 +473,10 @@ process_enc_rfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
                 count = tiles_left;
                 for (index = 0; index < count; index++)
                 {
-                    x = enc->crects[(index + all_tiles_written) * 4 + 0];
-                    y = enc->crects[(index + all_tiles_written) * 4 + 1];
-                    cx = enc->crects[(index + all_tiles_written) * 4 + 2];
-                    cy = enc->crects[(index + all_tiles_written) * 4 + 3];
+                    x = enc->u.sc.crects[(index + all_tiles_written) * 4 + 0];
+                    y = enc->u.sc.crects[(index + all_tiles_written) * 4 + 1];
+                    cx = enc->u.sc.crects[(index + all_tiles_written) * 4 + 2];
+                    cy = enc->u.sc.crects[(index + all_tiles_written) * 4 + 3];
                     tiles[index].x = x;
                     tiles[index].y = y;
                     tiles[index].cx = cx;
@@ -470,13 +486,13 @@ process_enc_rfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
                     tiles[index].quant_cr = self->quant_idx_v;
                 }
 
-                count = enc->num_drects;
+                count = enc->u.sc.num_drects;
                 for (index = 0; index < count; index++)
                 {
-                    x = enc->drects[index * 4 + 0];
-                    y = enc->drects[index * 4 + 1];
-                    cx = enc->drects[index * 4 + 2];
-                    cy = enc->drects[index * 4 + 3];
+                    x = enc->u.sc.drects[index * 4 + 0];
+                    y = enc->u.sc.drects[index * 4 + 1];
+                    cx = enc->u.sc.drects[index * 4 + 2];
+                    cy = enc->u.sc.drects[index * 4 + 3];
                     rfxrects[index].x = x;
                     rfxrects[index].y = y;
                     rfxrects[index].cx = cx;
@@ -484,13 +500,14 @@ process_enc_rfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
                 }
 
                 out_data_bytes = self->max_compressed_bytes;
-                tiles_written = rfxcodec_encode(self->codec_handle,
+                tiles_written = rfxcodec_encode(self->codec_handle_rfx,
                                                 out_data + XRDP_SURCMD_PREFIX_BYTES,
-                                                &out_data_bytes, enc->data,
-                                                enc->width, enc->height,
-                                                enc->width * 4,
-                                                rfxrects, enc->num_drects,
-                                                tiles, enc->num_crects,
+                                                &out_data_bytes,
+                                                enc->u.sc.data,
+                                                enc->u.sc.twidth, enc->u.sc.theight,
+                                                enc->u.sc.twidth * 4,
+                                                rfxrects, enc->u.sc.num_drects,
+                                                tiles, enc->u.sc.num_crects,
                                                 self->quants, self->num_quants);
             }
         }
@@ -510,12 +527,8 @@ process_enc_rfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
         enc_done->pad_bytes = XRDP_SURCMD_PREFIX_BYTES;
         enc_done->comp_pad_data = out_data;
         enc_done->enc = enc;
-        enc_done->cx = self->mm->wm->screen->width;
-        enc_done->cy = self->mm->wm->screen->height;
-        if (self->gfx)
-        {
-            enc_done->flags = 2;
-        }
+        enc_done->cx = enc->u.sc.twidth;
+        enc_done->cy = enc->u.sc.theight;
 
         enc_done->continuation = all_tiles_written > 0;
         if (tiles_written > 0)
@@ -523,8 +536,9 @@ process_enc_rfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
             all_tiles_written += tiles_written;
         }
         finished =
-            (all_tiles_written == enc->num_crects) || (tiles_written < 0);
+            (all_tiles_written == enc->u.sc.num_crects) || (tiles_written < 0);
         enc_done->last = finished;
+        enc_done->frame_id = enc->u.sc.frame_id;
 
         /* done with msg */
         /* inform main thread done */
@@ -586,6 +600,57 @@ static int n_save_data(const char *data, int data_size, int width, int height)
 #if defined(XRDP_X264)
 
 /*****************************************************************************/
+static int
+out_RFX_AVC420_METABLOCK(struct xrdp_egfx_rect *dst_rect,
+                         struct stream *s,
+                         struct xrdp_egfx_rect *rects,
+                         int num_rects)
+{
+    struct xrdp_region *reg;
+    struct xrdp_rect rect;
+    int index;
+    int count;
+
+    /* RFX_AVC420_METABLOCK */
+    s_push_layer(s, iso_hdr, 4); /* numRegionRects, set later */
+    reg = xrdp_region_create(NULL);
+    if (reg == NULL)
+    {
+        return 1;
+    }
+    for (index = 0; index < num_rects; index++)
+    {
+        rect.left = MAX(dst_rect->x1, rects[index].x1 - 1);
+        rect.top = MAX(dst_rect->y1, rects[index].y1 - 1);
+        rect.right = MIN(dst_rect->x2, rects[index].x2 + 1);
+        rect.bottom = MIN(dst_rect->y2, rects[index].y2 + 1);
+        xrdp_region_add_rect(reg, &rect);
+    }
+    index = 0;
+    while (xrdp_region_get_rect(reg, index, &rect) == 0)
+    {
+        out_uint16_le(s, rect.left);
+        out_uint16_le(s, rect.top);
+        out_uint16_le(s, rect.right);
+        out_uint16_le(s, rect.bottom);
+        index++;
+    }
+    xrdp_region_delete(reg);
+    count = index;
+    while (index > 0)
+    {
+        out_uint8(s, 23); /* qp */
+        out_uint8(s, 100); /* quality level 0..100 */
+        index--;
+    }
+    s_push_layer(s, mcs_hdr, 0);
+    s_pop_layer(s, iso_hdr);
+    out_uint32_le(s, count); /* numRegionRects */
+    s_pop_layer(s, mcs_hdr);
+    return 0;
+}
+
+/*****************************************************************************/
 /* called from encoder thread */
 static int
 process_enc_h264(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
@@ -607,36 +672,31 @@ process_enc_h264(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
     struct stream ls;
     struct stream *s;
     int comp_bytes_pre;
-    int enc_done_flags;
-    struct enc_rect rect;
-    int scr_width;
-    int scr_height;
+    int session_id;
+    int codec_flags;
 
     LOG(LOG_LEVEL_DEBUG, "process_enc_x264:");
     LOG(LOG_LEVEL_DEBUG, "process_enc_x264: num_crects %d num_drects %d",
-        enc->num_crects, enc->num_drects);
-
-    scr_width = self->mm->wm->screen->width;
-    scr_height = self->mm->wm->screen->height;
+        enc->u.sc.num_crects, enc->u.sc.num_drects);
 
     fifo_processed = self->fifo_processed;
     mutex = self->mutex;
     event_processed = self->xrdp_encoder_event_processed;
 
-    rcount = enc->num_drects;
-    rrects = enc->drects;
+    rcount = enc->u.sc.num_drects;
+    rrects = enc->u.sc.drects;
     if (rcount > 15)
     {
-        rcount = enc->num_crects;
-        rrects = enc->crects;
+        rcount = enc->u.sc.num_crects;
+        rrects = enc->u.sc.crects;
     }
 
     out_data_bytes = 16 * 1024 * 1024;
-    index = 256 + 16 + 2 + enc->num_drects * 8;
+    index = 256 + 16 + 2 + enc->u.sc.num_drects * 8;
     out_data = g_new(char, out_data_bytes + index);
     if (out_data == NULL)
     {
-        return 0;
+        return 1;
     }
 
     s = &ls;
@@ -644,84 +704,65 @@ process_enc_h264(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
     ls.data = out_data + 256;
     ls.p = ls.data;
 
-    if (self->gfx)
+    session_id = (enc->u.sc.flags >> 28) & 0xF;
+
+    codec_flags = 0;
+    s_push_layer(s, mcs_hdr, 0);
+    out_uint32_le(s, 0); /* flags, updated later */
+    out_uint32_le(s, session_id);
+    out_uint16_le(s, enc->u.sc.width); /* src_width */
+    out_uint16_le(s, enc->u.sc.height); /* src_height */
+    out_uint16_le(s, enc->u.sc.width); /* dst_width */
+    out_uint16_le(s, enc->u.sc.height); /* dst_height */
+    out_uint16_le(s, rcount);
+    for (index = 0; index < rcount; index++)
     {
-        /* RFX_AVC420_METABLOCK */
-        out_uint32_le(s, rcount); /* numRegionRects */
-        for (index = 0; index < rcount; index++)
-        {
-            x = rrects[index * 4 + 0];
-            y = rrects[index * 4 + 1];
-            cx = rrects[index * 4 + 2];
-            cy = rrects[index * 4 + 3];
-            /* RDPGFX_RECT16 */
-            rect.x1 = MAX(0, x - 1);
-            rect.y1 = MAX(0, y - 1);
-            rect.x2 = MIN(x + cx + 1, scr_width);
-            rect.y2 = MIN(y + cy + 1, scr_height);
-            out_uint16_le(s, rect.x1);
-            out_uint16_le(s, rect.y1);
-            out_uint16_le(s, rect.x2);
-            out_uint16_le(s, rect.y2);
-        }
-        for (index = 0; index < rcount; index++)
-        {
-            out_uint8(s, 23); /* qp */
-            out_uint8(s, 100); /* quality level 0..100 */
-        }
-        comp_bytes_pre = 4 + rcount * 8 + rcount * 2;
-        enc_done_flags = 1;
+        x = rrects[index * 4 + 0];
+        y = rrects[index * 4 + 1];
+        cx = rrects[index * 4 + 2];
+        cy = rrects[index * 4 + 3];
+        x -= enc->u.sc.left;
+        y -= enc->u.sc.top;
+        out_uint16_le(s, x);
+        out_uint16_le(s, y);
+        out_uint16_le(s, cx);
+        out_uint16_le(s, cy);
     }
-    else
-    {
-        out_uint32_le(s, 0); /* flags */
-        out_uint32_le(s, 0); /* session id */
-        out_uint16_le(s, enc->width); /* src_width */
-        out_uint16_le(s, enc->height); /* src_height */
-        out_uint16_le(s, enc->width); /* dst_width */
-        out_uint16_le(s, enc->height); /* dst_height */
-        out_uint16_le(s, rcount);
-        for (index = 0; index < rcount; index++)
-        {
-            x = rrects[index * 4 + 0];
-            y = rrects[index * 4 + 1];
-            cx = rrects[index * 4 + 2];
-            cy = rrects[index * 4 + 3];
-            out_uint16_le(s, x);
-            out_uint16_le(s, y);
-            out_uint16_le(s, cx);
-            out_uint16_le(s, cy);
-        }
-        s_push_layer(s, iso_hdr, 4);
-        comp_bytes_pre = 4 + 4 + 2 + 2 + 2 + 2 + 2 + rcount * 8 + 4;
-        enc_done_flags = 0;
-    }
+    s_push_layer(s, iso_hdr, 4);
+    comp_bytes_pre = 4 + 4 + 2 + 2 + 2 + 2 + 2 + rcount * 8 + 4;
+
     error = 0;
-    if (enc->flags & 1)
+    if (enc->u.sc.flags & 1)
     {
         /* already compressed */
-        uint8_t *ud = (uint8_t *) (enc->data);
+        uint8_t *ud = (uint8_t *) (enc->u.sc.data);
         int cbytes = ud[0] | (ud[1] << 8) | (ud[2] << 16) | (ud[3] << 24);
         if ((cbytes < 1) || (cbytes > out_data_bytes))
         {
             LOG(LOG_LEVEL_INFO, "process_enc_h264: bad h264 bytes %d", cbytes);
             g_free(out_data);
-            return 0;
+            return 1;
         }
         LOG(LOG_LEVEL_DEBUG,
             "process_enc_h264: already compressed and size is %d", cbytes);
         out_data_bytes = cbytes;
-        g_memcpy(s->p, enc->data + 4, out_data_bytes);
+        g_memcpy(s->p, enc->u.sc.data + 4, out_data_bytes);
     }
     else
     {
 #if defined(XRDP_X264)
-        error = xrdp_encoder_x264_encode(self->codec_handle, 0,
-                                         enc->width, enc->height, 0,
-                                         enc->data,
-                                         s->p, &out_data_bytes);
+        error = xrdp_encoder_x264_encode(self->codec_handle_h264, session_id,
+                                         enc->u.sc.left, enc->u.sc.top,
+                                         enc->u.sc.width, enc->u.sc.height,
+                                         enc->u.sc.twidth, enc->u.sc.theight,
+                                         0, enc->u.sc.data, rrects, rcount,
+                                         s->p, &out_data_bytes, &codec_flags);
 #endif
     }
+    s_push_layer(s, sec_hdr, 0);
+    s_pop_layer(s, mcs_hdr);
+    out_uint32_le(s, codec_flags);
+    s_pop_layer(s, sec_hdr);
     LOG_DEVEL(LOG_LEVEL_TRACE,
               "process_enc_h264: xrdp_encoder_x264_encode rv %d "
               "out_data_bytes %d width %d height %d",
@@ -732,15 +773,12 @@ process_enc_h264(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
                   "process_enc_h264: xrdp_encoder_x264_encode failed rv %d",
                   error);
         g_free(out_data);
-        return 0;
+        return 1;
     }
     s->end = s->p + out_data_bytes;
 
-    if (s->iso_hdr != NULL)
-    {
-        s_pop_layer(s, iso_hdr);
-        out_uint32_le(s, out_data_bytes);
-    }
+    s_pop_layer(s, iso_hdr);
+    out_uint32_le(s, out_data_bytes);
 
 #if SAVE_VIDEO
     n_save_data(s->p, out_data_bytes, enc->width, enc->height);
@@ -749,16 +787,18 @@ process_enc_h264(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
     enc_done = g_new0(XRDP_ENC_DATA_DONE, 1);
     if (enc_done == NULL)
     {
-        return 0;
+        return 1;
     }
     enc_done->comp_bytes = comp_bytes_pre + out_data_bytes;
     enc_done->pad_bytes = 256;
     enc_done->comp_pad_data = out_data;
     enc_done->enc = enc;
     enc_done->last = 1;
-    enc_done->cx = scr_width;
-    enc_done->cy = scr_height;
-    enc_done->flags = enc_done_flags;
+    enc_done->x = enc->u.sc.left;
+    enc_done->y = enc->u.sc.top;
+    enc_done->cx = enc->u.sc.width;
+    enc_done->cy = enc->u.sc.height;
+    enc_done->frame_id = enc->u.sc.frame_id;
 
     /* done with msg */
     /* inform main thread done */
@@ -783,6 +823,677 @@ process_enc_h264(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
 }
 
 #endif
+
+/*****************************************************************************/
+static struct stream *
+gfx_wiretosurface1(struct xrdp_encoder *self,
+                   struct xrdp_egfx_bulk *bulk, struct stream *in_s,
+                   struct xrdp_enc_gfx_cmd *enc_gfx_cmd)
+{
+#ifdef XRDP_X264
+    int index;
+    int surface_id;
+    int codec_id;
+    int pixel_format;
+    int num_rects_d;
+    int num_rects_c;
+    struct stream *rv;
+    short left;
+    short top;
+    short width;
+    short height;
+    short twidth;
+    short theight;
+    int bitmap_data_length;
+    int flags;
+    struct xrdp_egfx_rect *d_rects;
+    struct xrdp_egfx_rect *c_rects;
+    struct xrdp_egfx_rect dst_rect;
+    int error;
+    struct stream ls;
+    struct stream *s;
+    short *crects;
+
+    if (self->codec_handle_gfx[1] == NULL)
+    {
+        return NULL;
+    }
+    s = &ls;
+    g_memset(s, 0, sizeof(struct stream));
+    s->size = self->max_compressed_bytes;
+    s->data = g_new(char, s->size);
+    if (s->data == NULL)
+    {
+        return NULL;
+    }
+    s->p = s->data;
+    if (!s_check_rem(in_s, 11))
+    {
+        g_free(s->data);
+        return NULL;
+    }
+    in_uint16_le(in_s, surface_id);
+    in_uint16_le(in_s, codec_id);
+    in_uint8(in_s, pixel_format);
+    in_uint32_le(in_s, flags);
+    in_uint16_le(in_s, num_rects_d);
+    if ((num_rects_d < 1) || (num_rects_d > 16 * 1024) ||
+            (!s_check_rem(in_s, num_rects_d * 8)))
+    {
+        g_free(s->data);
+        return NULL;
+    }
+    d_rects = g_new0(struct xrdp_egfx_rect, num_rects_d);
+    if (d_rects == NULL)
+    {
+        g_free(s->data);
+        return NULL;
+    }
+    for (index = 0; index < num_rects_d; index++)
+    {
+        in_uint16_le(in_s, left);
+        in_uint16_le(in_s, top);
+        in_uint16_le(in_s, width);
+        in_uint16_le(in_s, height);
+        d_rects[index].x1 = left;
+        d_rects[index].y1 = top;
+        d_rects[index].x2 = left + width;
+        d_rects[index].y2 = top + height;
+
+    }
+    if (!s_check_rem(in_s, 2))
+    {
+        g_free(s->data);
+        g_free(d_rects);
+        return NULL;
+    }
+    in_uint16_le(in_s, num_rects_c);
+    if ((num_rects_c < 1) || (num_rects_c > 16 * 1024) ||
+            (!s_check_rem(in_s, num_rects_c * 8)))
+    {
+        g_free(s->data);
+        g_free(d_rects);
+        return NULL;
+    }
+    c_rects = g_new0(struct xrdp_egfx_rect, num_rects_c);
+    if (c_rects == NULL)
+    {
+        g_free(s->data);
+        g_free(d_rects);
+        return NULL;
+    }
+    crects = g_new(short, num_rects_c * 4);
+    if (crects == NULL)
+    {
+        g_free(s->data);
+        g_free(c_rects);
+        g_free(d_rects);
+        return NULL;
+    }
+    g_memcpy(crects, in_s->p, num_rects_c * 2 * 4);
+    for (index = 0; index < num_rects_c; index++)
+    {
+        in_uint16_le(in_s, left);
+        in_uint16_le(in_s, top);
+        in_uint16_le(in_s, width);
+        in_uint16_le(in_s, height);
+        c_rects[index].x1 = left;
+        c_rects[index].y1 = top;
+        c_rects[index].x2 = left + width;
+        c_rects[index].y2 = top + height;
+    }
+    if (!s_check_rem(in_s, 12))
+    {
+        g_free(s->data);
+        g_free(c_rects);
+        g_free(d_rects);
+        g_free(crects);
+        return NULL;
+    }
+    in_uint16_le(in_s, left);
+    in_uint16_le(in_s, top);
+    in_uint16_le(in_s, width);
+    in_uint16_le(in_s, height);
+    in_uint16_le(in_s, twidth);
+    in_uint16_le(in_s, theight);
+    dst_rect.x1 = left;
+    dst_rect.y1 = top;
+    dst_rect.x2 = left + width;
+    dst_rect.y2 = top + height;
+
+    /* RFX_AVC420_METABLOCK */
+    if (out_RFX_AVC420_METABLOCK(&dst_rect, s, d_rects, num_rects_d) != 0)
+    {
+        g_free(s->data);
+        g_free(c_rects);
+        g_free(d_rects);
+        g_free(crects);
+        return NULL;
+    }
+
+    g_free(c_rects);
+    g_free(d_rects);
+
+    if (ENC_IS_BIT_SET(flags, 0))
+    {
+        /* already compressed */
+        out_uint8a(s, enc_gfx_cmd->data, enc_gfx_cmd->data_bytes);
+    }
+    else
+    {
+        /* assume NV12 format */
+        if (twidth * theight * 3 / 2 > enc_gfx_cmd->data_bytes)
+        {
+            g_free(s->data);
+            g_free(crects);
+            return NULL;
+        }
+        bitmap_data_length = s_rem_out(s);
+        error = xrdp_encoder_x264_encode(self->codec_handle_gfx[1], 0,
+                                         left, top,
+                                         width, height, twidth, theight,  0,
+                                         enc_gfx_cmd->data,
+                                         crects, num_rects_c,
+                                         s->p, &bitmap_data_length, NULL);
+        if (error == 0)
+        {
+            xstream_seek(s, bitmap_data_length);
+        }
+        else
+        {
+            g_free(s->data);
+            g_free(crects);
+            return NULL;
+        }
+    }
+    s_mark_end(s);
+    bitmap_data_length = (int) (s->end - s->data);
+    rv = xrdp_egfx_wire_to_surface1(bulk, surface_id,
+                                    codec_id,
+                                    pixel_format, &dst_rect,
+                                    s->data, bitmap_data_length);
+    g_free(s->data);
+    g_free(crects);
+    return rv;
+#else
+    (void)self;
+    (void)bulk;
+    (void)in_s;
+    (void)enc_gfx_cmd;
+    return NULL;
+#endif
+}
+
+/*****************************************************************************/
+static struct stream *
+gfx_wiretosurface2(struct xrdp_encoder *self,
+                   struct xrdp_egfx_bulk *bulk, struct stream *in_s,
+                   struct xrdp_enc_gfx_cmd *enc_gfx_cmd)
+{
+#ifdef XRDP_RFXCODEC
+    int index;
+    int surface_id;
+    int codec_id;
+    int codec_context_id;
+    int pixel_format;
+    int num_rects_d;
+    int num_rects_c;
+    struct stream *rv;
+    short left;
+    short top;
+    short width;
+    short height;
+    short twidth;
+    short theight;
+    char *bitmap_data;
+    int bitmap_data_length;
+    struct rfx_tile *tiles;
+    struct rfx_rect *rfxrects;
+    int flags;
+    int tiles_written;
+    int do_free;
+    int do_send;
+
+    if (self->codec_handle_gfx[0] == NULL)
+    {
+        return NULL;
+    }
+    if (!s_check_rem(in_s, 15))
+    {
+        return NULL;
+    }
+    in_uint16_le(in_s, surface_id);
+    in_uint16_le(in_s, codec_id);
+    in_uint32_le(in_s, codec_context_id);
+    in_uint8(in_s, pixel_format);
+    in_uint32_le(in_s, flags);
+    in_uint16_le(in_s, num_rects_d);
+    if ((num_rects_d < 1) || (num_rects_d > 16 * 1024) ||
+            (!s_check_rem(in_s, num_rects_d * 8)))
+    {
+        return NULL;
+    }
+    rfxrects = g_new0(struct rfx_rect, num_rects_d);
+    if (rfxrects == NULL)
+    {
+        return NULL;
+    }
+    for (index = 0; index < num_rects_d; index++)
+    {
+        in_uint16_le(in_s, left);
+        in_uint16_le(in_s, top);
+        in_uint16_le(in_s, width);
+        in_uint16_le(in_s, height);
+        rfxrects[index].x = left;
+        rfxrects[index].y = top;
+        rfxrects[index].cx = width;
+        rfxrects[index].cy = height;
+    }
+    if (!s_check_rem(in_s, 2))
+    {
+        g_free(rfxrects);
+        return NULL;
+    }
+    in_uint16_le(in_s, num_rects_c);
+    if ((num_rects_c < 1) || (num_rects_c > 16 * 1024) ||
+            (!s_check_rem(in_s, num_rects_c * 8)))
+    {
+        g_free(rfxrects);
+        return NULL;
+    }
+    tiles = g_new0(struct rfx_tile, num_rects_c);
+    if (tiles == NULL)
+    {
+        g_free(rfxrects);
+        return NULL;
+    }
+    for (index = 0; index < num_rects_c; index++)
+    {
+        in_uint16_le(in_s, left);
+        in_uint16_le(in_s, top);
+        in_uint16_le(in_s, width);
+        in_uint16_le(in_s, height);
+        tiles[index].x = left;
+        tiles[index].y = top;
+        tiles[index].cx = width;
+        tiles[index].cy = height;
+        tiles[index].quant_y = self->quant_idx_y;
+        tiles[index].quant_cb = self->quant_idx_u;
+        tiles[index].quant_cr = self->quant_idx_v;
+    }
+    if (!s_check_rem(in_s, 12))
+    {
+        g_free(tiles);
+        g_free(rfxrects);
+        return NULL;
+    }
+    in_uint16_le(in_s, left);
+    in_uint16_le(in_s, top);
+    in_uint16_le(in_s, width);
+    in_uint16_le(in_s, height);
+    in_uint16_le(in_s, twidth);
+    in_uint16_le(in_s, theight);
+    do_free = 0;
+    do_send = 0;
+    if (ENC_IS_BIT_SET(flags, 0))
+    {
+        /* already compressed */
+        bitmap_data_length = enc_gfx_cmd->data_bytes;
+        bitmap_data = enc_gfx_cmd->data;
+        do_send = 1;
+    }
+    else
+    {
+        bitmap_data_length = self->max_compressed_bytes;
+        bitmap_data = g_new(char, bitmap_data_length);
+        if (bitmap_data == NULL)
+        {
+            g_free(tiles);
+            g_free(rfxrects);
+            return NULL;
+        }
+        do_free = 1;
+        tiles_written = rfxcodec_encode(self->codec_handle_gfx[0],
+                                        bitmap_data,
+                                        &bitmap_data_length,
+                                        enc_gfx_cmd->data,
+                                        twidth, theight,
+                                        twidth * 4,
+                                        rfxrects, num_rects_d,
+                                        tiles, num_rects_c,
+                                        self->quants, self->num_quants);
+        if (tiles_written > 0)
+        {
+            do_send = 1;
+        }
+    }
+    g_free(tiles);
+    g_free(rfxrects);
+    rv = NULL;
+    if (do_send)
+    {
+        rv = xrdp_egfx_wire_to_surface2(bulk, surface_id,
+                                        codec_id, codec_context_id,
+                                        pixel_format,
+                                        bitmap_data, bitmap_data_length);
+    }
+    if (do_free)
+    {
+        g_free(bitmap_data);
+    }
+    return rv;
+#else
+    (void)self;
+    (void)bulk;
+    (void)in_s;
+    (void)enc_gfx_cmd;
+    return NULL;
+#endif
+}
+
+/*****************************************************************************/
+static struct stream *
+gfx_solidfill(struct xrdp_encoder *self,
+              struct xrdp_egfx_bulk *bulk, struct stream *in_s)
+{
+    int surface_id;
+    int pixel;
+    int num_rects;
+    char *ptr8;
+    struct xrdp_egfx_rect *rects;
+
+    if (!s_check_rem(in_s, 8))
+    {
+        return NULL;
+    }
+    in_uint16_le(in_s, surface_id);
+    in_uint32_le(in_s, pixel);
+    in_uint16_le(in_s, num_rects);
+    if (!s_check_rem(in_s, num_rects * 8))
+    {
+        return NULL;
+    }
+    in_uint8p(in_s, ptr8, num_rects * 8);
+    rects = (struct xrdp_egfx_rect *) ptr8;
+    return xrdp_egfx_fill_surface(bulk, surface_id, pixel, num_rects, rects);
+}
+
+/*****************************************************************************/
+static struct stream *
+gfx_surfacetosurface(struct xrdp_encoder *self,
+                     struct xrdp_egfx_bulk *bulk, struct stream *in_s)
+{
+    int surface_id_src;
+    int surface_id_dst;
+    char *ptr8;
+    int num_pts;
+    struct xrdp_egfx_rect *rects;
+    struct xrdp_egfx_point *pts;
+
+    if (!s_check_rem(in_s, 14))
+    {
+        return NULL;
+    }
+    in_uint16_le(in_s, surface_id_src);
+    in_uint16_le(in_s, surface_id_dst);
+    in_uint8p(in_s, ptr8, 8);
+    rects = (struct xrdp_egfx_rect *) ptr8;
+    in_uint16_le(in_s, num_pts);
+    if (!s_check_rem(in_s, num_pts * 4))
+    {
+        return NULL;
+    }
+    in_uint8p(in_s, ptr8, num_pts * 4);
+    pts = (struct xrdp_egfx_point *) ptr8;
+    return xrdp_egfx_surface_to_surface(bulk, surface_id_src, surface_id_dst,
+                                        rects, num_pts, pts);
+}
+
+/*****************************************************************************/
+static struct stream *
+gfx_createsurface(struct xrdp_encoder *self,
+                  struct xrdp_egfx_bulk *bulk, struct stream *in_s)
+{
+    int surface_id;
+    int width;
+    int height;
+    int pixel_format;
+
+    if (!s_check_rem(in_s, 7))
+    {
+        return NULL;
+    }
+    in_uint16_le(in_s, surface_id);
+    in_uint16_le(in_s, width);
+    in_uint16_le(in_s, height);
+    in_uint8(in_s, pixel_format);
+    return xrdp_egfx_create_surface(bulk, surface_id,
+                                    width, height, pixel_format);
+}
+
+/*****************************************************************************/
+static struct stream *
+gfx_deletesurface(struct xrdp_encoder *self,
+                  struct xrdp_egfx_bulk *bulk, struct stream *in_s)
+{
+    int surface_id;
+
+    if (!s_check_rem(in_s, 2))
+    {
+        return NULL;
+    }
+    in_uint16_le(in_s, surface_id);
+    return xrdp_egfx_delete_surface(bulk, surface_id);
+}
+
+/*****************************************************************************/
+static struct stream *
+gfx_startframe(struct xrdp_encoder *self,
+               struct xrdp_egfx_bulk *bulk, struct stream *in_s)
+{
+    int frame_id;
+    int time_stamp;
+
+    if (!s_check_rem(in_s, 8))
+    {
+        return NULL;
+    }
+    in_uint32_le(in_s, frame_id);
+    in_uint32_le(in_s, time_stamp);
+    return xrdp_egfx_frame_start(bulk, frame_id, time_stamp);
+}
+
+/*****************************************************************************/
+static struct stream *
+gfx_endframe(struct xrdp_encoder *self,
+             struct xrdp_egfx_bulk *bulk, struct stream *in_s, int *aframe_id)
+{
+    int frame_id;
+
+    if (!s_check_rem(in_s, 4))
+    {
+        return NULL;
+    }
+    in_uint32_le(in_s, frame_id);
+    *aframe_id = frame_id;
+    return xrdp_egfx_frame_end(bulk, frame_id);
+}
+
+/*****************************************************************************/
+static struct stream *
+gfx_resetgraphics(struct xrdp_encoder *self,
+                  struct xrdp_egfx_bulk *bulk, struct stream *in_s)
+{
+    int width;
+    int height;
+    int monitor_count;
+    int index;
+    struct monitor_info *mi;
+    struct stream *rv;
+
+    if (!s_check_rem(in_s, 12))
+    {
+        return NULL;
+    }
+    in_uint32_le(in_s, width);
+    in_uint32_le(in_s, height);
+    in_uint32_le(in_s, monitor_count);
+    if ((monitor_count < 1) || (monitor_count > 16) ||
+            !s_check_rem(in_s, monitor_count * 20))
+    {
+        return NULL;
+    }
+    mi = g_new0(struct monitor_info, monitor_count);
+    if (mi == NULL)
+    {
+        return NULL;
+    }
+    for (index = 0; index < monitor_count; index++)
+    {
+        in_uint32_le(in_s, mi[index].left);
+        in_uint32_le(in_s, mi[index].top);
+        in_uint32_le(in_s, mi[index].right);
+        in_uint32_le(in_s, mi[index].bottom);
+        in_uint32_le(in_s, mi[index].is_primary);
+    }
+    rv = xrdp_egfx_reset_graphics(bulk, width, height, monitor_count, mi);
+    g_free(mi);
+    return rv;
+}
+
+/*****************************************************************************/
+static struct stream *
+gfx_mapsurfacetooutput(struct xrdp_encoder *self,
+                       struct xrdp_egfx_bulk *bulk, struct stream *in_s)
+{
+    int surface_id;
+    int x;
+    int y;
+
+    if (!s_check_rem(in_s, 10))
+    {
+        return NULL;
+    }
+    in_uint16_le(in_s, surface_id);
+    in_uint32_le(in_s, x);
+    in_uint32_le(in_s, y);
+    return xrdp_egfx_map_surface(bulk, surface_id, x, y);
+}
+
+/*****************************************************************************/
+/* called from encoder thread */
+static int
+process_enc_egfx(struct xrdp_encoder *self, XRDP_ENC_DATA *enc)
+{
+    struct stream *s;
+    struct stream in_s;
+    struct xrdp_egfx_bulk *bulk;
+    XRDP_ENC_DATA_DONE *enc_done;
+    FIFO *fifo_processed;
+    tbus mutex;
+    tbus event_processed;
+    int cmd_id;
+    int cmd_bytes;
+    int frame_id;
+    int got_frame_id;
+    char *holdp;
+    char *holdend;
+
+    fifo_processed = self->fifo_processed;
+    mutex = self->mutex;
+    event_processed = self->xrdp_encoder_event_processed;
+    bulk = self->mm->egfx->bulk;
+    g_memset(&in_s, 0, sizeof(in_s));
+    in_s.data = enc->u.gfx.cmd;
+    in_s.size = enc->u.gfx.cmd_bytes;
+    in_s.p = in_s.data;
+    in_s.end = in_s.data + in_s.size;
+    while (s_check_rem(&in_s, 8))
+    {
+        s = NULL;
+        frame_id = 0;
+        got_frame_id = 0;
+        holdp = in_s.p;
+        in_uint16_le(&in_s, cmd_id);
+        in_uint8s(&in_s, 2); /* flags */
+        in_uint32_le(&in_s, cmd_bytes);
+        if ((cmd_bytes < 8) || (cmd_bytes > 32 * 1024))
+        {
+            return 1;
+        }
+        holdend = in_s.end;
+        in_s.end = holdp + cmd_bytes;
+        switch (cmd_id)
+        {
+            case XR_RDPGFX_CMDID_WIRETOSURFACE_1:       /* 0x0001 */
+                s = gfx_wiretosurface1(self, bulk, &in_s, &(enc->u.gfx));
+                break;
+            case XR_RDPGFX_CMDID_WIRETOSURFACE_2:       /* 0x0002 */
+                s = gfx_wiretosurface2(self, bulk, &in_s, &(enc->u.gfx));
+                break;
+            case XR_RDPGFX_CMDID_SOLIDFILL:             /* 0x0004 */
+                s = gfx_solidfill(self, bulk, &in_s);
+                break;
+            case XR_RDPGFX_CMDID_SURFACETOSURFACE:      /* 0x0005 */
+                s = gfx_surfacetosurface(self, bulk, &in_s);
+                break;
+            case XR_RDPGFX_CMDID_CREATESURFACE:         /* 0x0009 */
+                s = gfx_createsurface(self, bulk, &in_s);
+                break;
+            case XR_RDPGFX_CMDID_DELETESURFACE:         /* 0x000A */
+                s = gfx_deletesurface(self, bulk, &in_s);
+                break;
+            case XR_RDPGFX_CMDID_STARTFRAME:            /* 0x000B */
+                s = gfx_startframe(self, bulk, &in_s);
+                break;
+            case XR_RDPGFX_CMDID_ENDFRAME:              /* 0x000C */
+                s = gfx_endframe(self, bulk, &in_s, &frame_id);
+                got_frame_id = 1;
+                break;
+            case XR_RDPGFX_CMDID_RESETGRAPHICS:         /* 0x000E */
+                s = gfx_resetgraphics(self, bulk, &in_s);
+                break;
+            case XR_RDPGFX_CMDID_MAPSURFACETOOUTPUT:    /* 0x000F */
+                s = gfx_mapsurfacetooutput(self, bulk, &in_s);
+                break;
+            default:
+                break;
+        }
+        if (s == NULL)
+        {
+            LOG(LOG_LEVEL_ERROR, "process_enc_egfx: cmd_id %d s = nil", cmd_id);
+            return 1;
+        }
+        /* setup for next cmd */
+        in_s.p = holdp + cmd_bytes;
+        in_s.end = holdend;
+        /* setup enc_done struct */
+        enc_done = g_new0(XRDP_ENC_DATA_DONE, 1);
+        if (enc_done == NULL)
+        {
+            free_stream(s);
+            return 1;
+        }
+        ENC_SET_BIT(enc_done->flags, ENC_DONE_FLAGS_GFX_BIT);
+        enc_done->enc = enc;
+        enc_done->last = !s_check_rem(&in_s, 8);
+        enc_done->comp_bytes = (int) (s->end - s->data);
+        enc_done->comp_pad_data = s->data;
+        if (got_frame_id)
+        {
+            ENC_SET_BIT(enc_done->flags, ENC_DONE_FLAGS_FRAME_ID_BIT);
+            enc_done->frame_id = frame_id;
+        }
+        g_free(s); /* don't call free_stream() here so s->data is valid */
+        /* inform main thread done */
+        tc_mutex_lock(mutex);
+        fifo_add_item(fifo_processed, enc_done);
+        tc_mutex_unlock(mutex);
+        /* signal completion for main thread */
+        g_set_wait_obj(event_processed);
+    }
+    return 0;
+}
 
 /**
  * Encoder thread main loop
@@ -857,10 +1568,26 @@ proc_enc_msg(void *arg)
             tc_mutex_lock(mutex);
             enc = (XRDP_ENC_DATA *) fifo_remove_item(fifo_to_proc);
             tc_mutex_unlock(mutex);
-            while (enc != 0)
+            while (enc != NULL)
             {
                 /* do work */
-                self->process_enc(self, enc);
+                if (self->process_enc(self, enc) != 0)
+                {
+                    LOG(LOG_LEVEL_ERROR, "proc_enc_msg: process_enc failed");
+                    if (ENC_IS_BIT_SET(enc->flags, ENC_FLAGS_GFX_BIT))
+                    {
+                        g_free(enc->u.gfx.cmd);
+                    }
+                    else
+                    {
+                        g_free(enc->u.sc.drects);
+                        g_free(enc->u.sc.crects);
+                    }
+                    if (enc->shmem_ptr != NULL)
+                    {
+                        g_munmap(enc->shmem_ptr, enc->shmem_bytes);
+                    }
+                }
                 /* get next msg */
                 tc_mutex_lock(mutex);
                 enc = (XRDP_ENC_DATA *) fifo_remove_item(fifo_to_proc);

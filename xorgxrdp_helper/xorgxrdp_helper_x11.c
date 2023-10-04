@@ -148,7 +148,7 @@ struct mon_info
     GLfloat *(*get_vertices)(GLuint *vertices_bytes,
                              GLuint *vertices_pointes,
                              int num_crects, struct xh_rect *crects,
-                             int width, int height);
+                             int left, int top, int width, int height);
     struct xh_rect viewport;
     struct enc_info *ei;
 };
@@ -254,15 +254,16 @@ xorgxrdp_helper_x11_init(void)
     if (XQueryExtension(g_display, "NV-CONTROL", &major_opcode, &first_event,
                         &first_error))
     {
-        LOG(LOG_LEVEL_INFO, "detected NVIDIA XServer");
+        LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_init: "
+            "detected NVIDIA XServer");
         g_inf = INF_GLX;
         g_enc = ENC_NVENC;
         if (g_inf_funcs[g_inf].init() != 0)
         {
-            LOG(LOG_LEVEL_ERROR, "GLX init failed");
+            LOG(LOG_LEVEL_ERROR, "xorgxrdp_helper_x11_init: GLX init failed");
             return 1;
         }
-        LOG(LOG_LEVEL_INFO, "using GLX");
+        LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_init: using GLX");
     }
     else
     {
@@ -270,16 +271,17 @@ xorgxrdp_helper_x11_init(void)
         g_enc = ENC_YAMI;
         if (g_inf_funcs[g_inf].init() != 0)
         {
-            LOG(LOG_LEVEL_ERROR, "EGL init failed");
+            LOG(LOG_LEVEL_ERROR, "xorgxrdp_helper_x11_init: EGL init failed");
             return 1;
         }
-        LOG(LOG_LEVEL_INFO, "using EGL");
+        LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_init: using EGL");
     }
     gl_ver = epoxy_gl_version();
-    LOG(LOG_LEVEL_INFO, "gl_ver %d", gl_ver);
+    LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_init: gl_ver %d", gl_ver);
     if (gl_ver < 30)
     {
-        LOG(LOG_LEVEL_ERROR, "gl_ver too old %d", gl_ver);
+        LOG(LOG_LEVEL_ERROR, "xorgxrdp_helper_x11_init: "
+            "gl_ver too old %d", gl_ver);
         return 1;
     }
     LOG(LOG_LEVEL_INFO, "vendor: %s",
@@ -335,17 +337,19 @@ xorgxrdp_helper_x11_init(void)
         glCompileShader(g_si[index].vertex_shader);
         glGetShaderiv(g_si[index].vertex_shader, GL_COMPILE_STATUS,
                       &compiled);
-        LOG(LOG_LEVEL_INFO, "vertex_shader compiled %d", compiled);
+        LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_init: "
+            "vertex_shader compiled %d", compiled);
         glCompileShader(g_si[index].fragment_shader);
         glGetShaderiv(g_si[index].fragment_shader, GL_COMPILE_STATUS,
                       &compiled);
-        LOG(LOG_LEVEL_INFO, "fragment_shader compiled %d", compiled);
+        LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_init: "
+            "fragment_shader compiled %d", compiled);
         g_si[index].program = glCreateProgram();
         glAttachShader(g_si[index].program, g_si[index].vertex_shader);
         glAttachShader(g_si[index].program, g_si[index].fragment_shader);
         glLinkProgram(g_si[index].program);
         glGetProgramiv(g_si[index].program, GL_LINK_STATUS, &linked);
-        LOG(LOG_LEVEL_INFO, "linked %d", linked);
+        LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_init: linked %d", linked);
         g_si[index].tex_loc =
             glGetUniformLocation(g_si[index].program, "tex");
         g_si[index].tex_size_loc =
@@ -356,7 +360,7 @@ xorgxrdp_helper_x11_init(void)
             glGetUniformLocation(g_si[index].program, "umath");
         g_si[index].vmath_loc =
             glGetUniformLocation(g_si[index].program, "vmath");
-        LOG(LOG_LEVEL_INFO, "tex_loc %d "
+        LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_init: tex_loc %d "
             "tex_size_loc %d ymath_loc %d umath_loc %d vmath_loc %d",
             g_si[index].tex_loc, g_si[index].tex_size_loc,
             g_si[index].ymath_loc, g_si[index].umath_loc,
@@ -365,22 +369,22 @@ xorgxrdp_helper_x11_init(void)
         glUseProgram(g_si[index].program);
         if (g_si[index].ymath_loc >= 0)
         {
-            glUniform4fv(g_si[index].ymath_loc, 1, g_rgb2yux_matrix[0].ymath);
+            glUniform4fv(g_si[index].ymath_loc, 1, g_rgb2yux_matrix[1].ymath);
         }
         if (g_si[index].umath_loc >= 0)
         {
-            glUniform4fv(g_si[index].umath_loc, 1, g_rgb2yux_matrix[0].umath);
+            glUniform4fv(g_si[index].umath_loc, 1, g_rgb2yux_matrix[1].umath);
         }
         if (g_si[index].vmath_loc >= 0)
         {
-            glUniform4fv(g_si[index].vmath_loc, 1, g_rgb2yux_matrix[0].vmath);
+            glUniform4fv(g_si[index].vmath_loc, 1, g_rgb2yux_matrix[1].vmath);
         }
         glUseProgram(0);
     }
     g_memset(g_mons, 0, sizeof(g_mons));
     if (g_enc_funcs[g_enc].init() != 0)
     {
-        LOG(LOG_LEVEL_ERROR, "encoder init failed");
+        LOG(LOG_LEVEL_ERROR, "xorgxrdp_helper_x11_init: encoder init failed");
         return 1;
     }
     return 0;
@@ -403,7 +407,7 @@ xorgxrdp_helper_x11_check_wait_objs(void)
 
     while (XPending(g_display) > 0)
     {
-        LOG_DEVEL(LOG_LEVEL_INFO, "loop");
+        LOG_DEVEL(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_check_wait_objs: loop");
         XNextEvent(g_display, &xevent);
     }
     return 0;
@@ -436,7 +440,7 @@ xorgxrdp_helper_x11_delete_all_pixmaps(void)
 static GLfloat *
 get_vertices_all(GLuint *vertices_bytes, GLuint *vertices_pointes,
                  int num_crects, struct xh_rect *crects,
-                 int width, int height)
+                 int left, int top, int width, int height)
 {
     GLfloat *vertices;
 
@@ -471,7 +475,7 @@ get_vertices_all(GLuint *vertices_bytes, GLuint *vertices_pointes,
 static GLfloat *
 get_vertices420(GLuint *vertices_bytes, GLuint *vertices_pointes,
                 int num_crects, struct xh_rect *crects,
-                int width, int height)
+                int left, int top, int width, int height)
 {
     GLfloat *vertices;
     GLfloat *vert;
@@ -490,7 +494,7 @@ get_vertices420(GLuint *vertices_bytes, GLuint *vertices_pointes,
     if (num_crects < 1)
     {
         return get_vertices_all(vertices_bytes, vertices_pointes,
-                                num_crects, crects, width, height);
+                                num_crects, crects, left, top, width, height);
     }
     vertices = g_new(GLfloat, num_crects * 24);
     if (vertices == NULL)
@@ -502,12 +506,13 @@ get_vertices420(GLuint *vertices_bytes, GLuint *vertices_pointes,
     for (index = 0; index < num_crects; index++)
     {
         crect = crects + index;
-        LOG_DEVEL(LOG_LEVEL_INFO, "rect index %d x %d y %d w %d h %d",
+        LOG_DEVEL(LOG_LEVEL_INFO, "get_vertices420: "
+                  "rect index %d x %d y %d w %d h %d",
                   index, crect->x, crect->y, crect->w, crect->h);
-        x1 = crect->x / fwidth;
-        y1 = crect->y / fheight;
-        x2 = (crect->x + crect->w) / fwidth;
-        y2 = (crect->y + crect->h) / fheight;
+        x1 = (crect->x - left) / fwidth;
+        y1 = (crect->y - top) / fheight;
+        x2 = ((crect->x - left) + crect->w) / fwidth;
+        y2 = ((crect->y - top) + crect->h) / fheight;
         vert = vertices + index * 24;
         /* y box */
         vert[0]  =  x1 - 1.0;
@@ -545,7 +550,7 @@ get_vertices420(GLuint *vertices_bytes, GLuint *vertices_pointes,
 static GLfloat *
 get_vertices444(GLuint *vertices_bytes, GLuint *vertices_pointes,
                 int num_crects, struct xh_rect *crects,
-                int width, int height)
+                int left, int top, int width, int height)
 {
     GLfloat *vertices;
     GLfloat *vert;
@@ -561,7 +566,7 @@ get_vertices444(GLuint *vertices_bytes, GLuint *vertices_pointes,
     if (num_crects < 1)
     {
         return get_vertices_all(vertices_bytes, vertices_pointes,
-                                num_crects, crects, width, height);
+                                num_crects, crects, left, top, width, height);
     }
     vertices = g_new(GLfloat, num_crects * 12);
     if (vertices == NULL)
@@ -573,10 +578,10 @@ get_vertices444(GLuint *vertices_bytes, GLuint *vertices_pointes,
     for (index = 0; index < num_crects; index++)
     {
         crect = crects + index;
-        x1 = crect->x / fwidth;
-        y1 = crect->y / fheight;
-        x2 = (crect->x + crect->w) / fwidth;
-        y2 = (crect->y + crect->h) / fheight;
+        x1 = (crect->x - left) / fwidth;
+        y1 = (crect->y - top) / fheight;
+        x2 = ((crect->x - left) + crect->w) / fwidth;
+        y2 = ((crect->y - top) + crect->h) / fheight;
         vert = vertices + index * 12;
         vert[0]  = x1 - 1.0;
         vert[1]  = y1 - 1.0;
@@ -612,12 +617,13 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
     mi = g_mons + mon_id % MAX_MON;
     if (mi->pixmap != 0)
     {
-        LOG(LOG_LEVEL_ERROR, "error already setup");
+        LOG(LOG_LEVEL_ERROR, "xorgxrdp_helper_x11_create_pixmap: "
+            "error already setup");
         return 1;
     }
-    LOG(LOG_LEVEL_INFO, "width %d height %d, "
-        "magic 0x%8.8x, con_id %d mod_id %d", width, height,
-        magic, con_id, mon_id);
+    LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_create_pixmap: "
+        "width %d height %d, magic 0x%8.8x, con_id %d mod_id %d",
+        width, height, magic, con_id, mon_id);
     pixmap = XCreatePixmap(g_display, g_root_window, width, height, 24);
     LOG(LOG_LEVEL_INFO, "pixmap %d", (int) pixmap);
 
@@ -644,7 +650,8 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     if (g_enc == ENC_NVENC)
     {
-        LOG(LOG_LEVEL_INFO, "using XH_YUV420");
+        LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_create_pixmap: "
+            "using XH_YUV420");
         mi->tex_format = XH_YUV420;
         glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height * 3 / 2, 0,
                      GL_RED, GL_UNSIGNED_BYTE, NULL);
@@ -656,7 +663,8 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
     }
     else if (g_enc == ENC_YAMI)
     {
-        LOG(LOG_LEVEL_INFO, "using XH_YUV422");
+        LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_create_pixmap: "
+            "using XH_YUV422");
         mi->tex_format = XH_YUV422;
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width / 2, height, 0,
                      GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, NULL);
@@ -668,7 +676,8 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
     }
     else
     {
-        LOG(LOG_LEVEL_INFO, "using XH_YUV444");
+        LOG(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_create_pixmap: "
+            "using XH_YUV444");
         mi->tex_format = XH_YUV444;
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
                      GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, NULL);
@@ -703,30 +712,19 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
 }
 
 /*****************************************************************************/
-enum encoder_result
-xorgxrdp_helper_x11_encode_pixmap(int width, int height, int mon_id,
-                                  int num_crects, struct xh_rect *crects,
-                                  void *cdata, int *cdata_bytes)
+static void
+xorgxrdp_helper_x11_run_shader(int left, int top, int width, int height,
+                               struct mon_info *mi,
+                               struct shader_info *si,
+                               int num_crects, struct xh_rect *crects)
 {
-    struct mon_info *mi;
-    struct shader_info *si;
-    enum encoder_result rv;
     GLuint vao;
     GLuint vbo;
     GLfloat *vertices;
     GLuint vertices_bytes;
     GLuint vertices_pointes;
 
-    mi = g_mons + mon_id % MAX_MON;
-    if ((width != mi->width) || (height != mi->height))
-    {
-        LOG(LOG_LEVEL_ERROR, "error width %d should be %d "
-            "height %d should be %d",
-            width, mi->width, height, mi->height);
-        return ENCODER_ERROR;
-    }
     /* rgb to yuv */
-    si = g_si + mi->tex_format % XH_NUM_SHADERS;
     glEnable(GL_TEXTURE_2D);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mi->bmp_texture);
@@ -737,12 +735,14 @@ xorgxrdp_helper_x11_encode_pixmap(int width, int height, int mon_id,
     glUseProgram(si->program);
     /* setup vertices from crects */
     vertices = mi->get_vertices(&vertices_bytes, &vertices_pointes,
-                                num_crects, crects, width, height);
+                                num_crects, crects,
+                                left, top, width, height);
     if (vertices == NULL)
     {
-        LOG(LOG_LEVEL_ERROR, "error get_vertices failed num_crects %d",
+        LOG(LOG_LEVEL_ERROR, "xorgxrdp_helper_x11_run_shader: "
+            "error get_vertices failed num_crects %d",
             num_crects);
-        return ENCODER_ERROR;
+        return;
     }
     glGenVertexArrays(1, &vao);
     glGenBuffers(1, &vbo);
@@ -766,6 +766,34 @@ xorgxrdp_helper_x11_encode_pixmap(int width, int height, int mon_id,
     g_inf_funcs[g_inf].release_tex_image(mi->inf_image);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
+}
+
+/*****************************************************************************/
+enum encoder_result
+xorgxrdp_helper_x11_encode_pixmap(int left, int top, int width, int height,
+                                  int mon_id, int num_crects,
+                                  struct xh_rect *crects,
+                                  void *cdata, int *cdata_bytes)
+{
+    struct mon_info *mi;
+    struct shader_info *si;
+    enum encoder_result rv;
+
+    mi = g_mons + mon_id % MAX_MON;
+    LOG_DEVEL(LOG_LEVEL_INFO, "xorgxrdp_helper_x11_encode_pixmap: "
+              "left %d top %d width %d height %d mon_id %d",
+              left, top, width, height, mon_id);
+    if ((width != mi->width) || (height != mi->height))
+    {
+        LOG(LOG_LEVEL_ERROR, "xorgxrdp_helper_x11_encode_pixmap: "
+            "error width %d should be %d "
+            "height %d should be %d",
+            width, mi->width, height, mi->height);
+        return ENCODER_ERROR;
+    }
+    si = g_si + mi->tex_format % XH_NUM_SHADERS;
+    xorgxrdp_helper_x11_run_shader(left, top, width, height, mi, si,
+                                   num_crects, crects);
     /* sync before encoding */
     XFlush(g_display);
     glFinish();
