@@ -266,6 +266,7 @@ xorg_process_message_62(struct xorgxrdp_info *xi, struct stream *s)
               total_shm_bytes);
     if (total_shm_bytes < 1)
     {
+        /* return no error */
         return 0;
     }
     num_fds = 0;
@@ -283,6 +284,7 @@ xorg_process_message_62(struct xorgxrdp_info *xi, struct stream *s)
         if (num_fds == 1)
         {
             g_file_close(fd);
+            /* return no error */
             return 0;
         }
     }
@@ -947,9 +949,9 @@ main(int argc, char **argv)
         return 1;
     }
     xorg_fd = g_atoi(g_getenv("XORGXRDP_XORG_FD"));
-    LOG(LOG_LEVEL_INFO, "xorg_fd: %s", g_getenv("XORGXRDP_XORG_FD"));
+    LOG(LOG_LEVEL_INFO, "xorg_fd: %d", xorg_fd);
     xrdp_fd = g_atoi(g_getenv("XORGXRDP_XRDP_FD"));
-    LOG(LOG_LEVEL_INFO, "xorg_fd: %s", g_getenv("XORGXRDP_XRDP_FD"));
+    LOG(LOG_LEVEL_INFO, "xrdp_fd: %d", xrdp_fd);
 
     xi.resizing = 0;
 
