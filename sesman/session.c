@@ -541,7 +541,7 @@ session_start(struct auth_info *auth_info,
         }
         else if (window_manager_pid == 0)
         {
-            env_set_user(s->uid,
+            env_set_user(s->username,
                          0,
                          display,
                          g_cfg->env_names,
@@ -824,7 +824,7 @@ session_start(struct auth_info *auth_info,
                 struct exit_status xserver_exit_status;
                 struct exit_status chansrv_exit_status;
 
-                chansrv_pid = session_start_chansrv(s->uid, display);
+                chansrv_pid = session_start_chansrv(s->username, display);
 
                 LOG(LOG_LEVEL_INFO,
                     "Session started successfully for user %s on display %d",

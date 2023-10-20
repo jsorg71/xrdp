@@ -60,19 +60,8 @@ xrdp_sesman_SOURCES = \
   xauth.c \
   xauth.h \
   xwait.c \
-  xwait.h
-
-# Possible authentication modules
-# See https://www.gnu.org/software/automake/manual/html_node/Conditional-Sources.html
-EXTRA_xrdp_sesman_SOURCES = \
- verify_user.c \
- verify_user_bsd.c \
- verify_user_kerberos.c \
- verify_user_pam.c \
- verify_user_pam_userpass.c
-
-# Make sure the right authentication module is pulled in
-xrdp_sesman_DEPENDENCIES = $(AUTHMOD_OBJ)
+  xwait.h \
+  $(AUTH_C)
 
 xrdp_sesman_LDADD = \
   $(top_builddir)/libipm/libipm.la \
