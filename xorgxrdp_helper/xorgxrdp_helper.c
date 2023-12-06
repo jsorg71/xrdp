@@ -164,7 +164,7 @@ gfx_wiretosurface1(struct xorgxrdp_info *xi, struct stream *s)
 
     cdata_bytes = GFX_MAP_SIZE;
     rv = xorgxrdp_helper_x11_encode_pixmap(left, top,
-                                           width, height, 0,
+                                           width, height, surface_id,
                                            num_rects_c, crects,
                                            addr, &cdata_bytes);
     LOG_DEVEL(LOG_LEVEL_INFO, "gfx_wiretosurface1: rv %d cdata_bytes %d",
@@ -243,6 +243,11 @@ xorg_process_message_62(struct xorgxrdp_info *xi, struct stream *s)
                 {
                     return 1;
                 }
+                break;
+            case 0x000E: /* XR_RDPGFX_CMDID_RESETGRAPHICS */
+                xrdp_invalidate = 1;
+                LOG(LOG_LEVEL_INFO, "xorg_process_message_62: "
+                    "XR_RDPGFX_CMDID_RESETGRAPHICS detected");
                 break;
         }
         /* setup for next cmd */
@@ -488,6 +493,7 @@ xorg_process_message(struct xorgxrdp_info *xi, struct stream *s)
     int size;
     int index;
     char *phold;
+    char *endhold;
     int width;
     int height;
     int magic;
@@ -506,12 +512,16 @@ xorg_process_message(struct xorgxrdp_info *xi, struct stream *s)
             phold = s->p;
             in_uint16_le(s, type);
             in_uint16_le(s, size);
+            endhold = s->end;
+            s->end = phold + size;
             switch (type)
             {
                 case 62:
                     /* process_server_egfx_shmfd */
                     if (xorg_process_message_62(xi, s) != 0)
                     {
+                        LOG(LOG_LEVEL_ERROR, "xorg_process_message: "
+                            "xorg_process_message_62 failed");
                         return 1;
                     }
                     break;
@@ -519,6 +529,8 @@ xorg_process_message(struct xorgxrdp_info *xi, struct stream *s)
                     /* process_server_set_pointer_shmfd */
                     if (xorg_process_message_63(xi, s) != 0)
                     {
+                        LOG(LOG_LEVEL_ERROR, "xorg_process_message: "
+                            "xorg_process_message_63 failed");
                         return 1;
                     }
                     break;
@@ -526,11 +538,14 @@ xorg_process_message(struct xorgxrdp_info *xi, struct stream *s)
                     /* process_server_paint_rect_shmfd */
                     if (xorg_process_message_64(xi, s) != 0)
                     {
+                        LOG(LOG_LEVEL_ERROR, "xorg_process_message: "
+                            "xorg_process_message_64 failed");
                         return 1;
                     }
                     break;
             }
             s->p = phold + size;
+            s->end = endhold;
         }
         if (xi->resizing > 0)
         {

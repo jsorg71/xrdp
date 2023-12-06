@@ -620,10 +620,12 @@ out_RFX_AVC420_METABLOCK(struct xrdp_egfx_rect *dst_rect,
     }
     for (index = 0; index < num_rects; index++)
     {
-        rect.left = MAX(dst_rect->x1, rects[index].x1 - 1);
-        rect.top = MAX(dst_rect->y1, rects[index].y1 - 1);
-        rect.right = MIN(dst_rect->x2, rects[index].x2 + 1);
-        rect.bottom = MIN(dst_rect->y2, rects[index].y2 + 1);
+        rect.left = MAX(0, rects[index].x1 - dst_rect->x1 - 1);
+        rect.top = MAX(0, rects[index].y1 - dst_rect->y1 - 1);
+        rect.right = MIN(dst_rect->x2 - dst_rect->x1,
+                         rects[index].x2 - dst_rect->x1 + 1);
+        rect.bottom = MIN(dst_rect->y2 - dst_rect->y1,
+                          rects[index].y2 - dst_rect->y1 + 1);
         xrdp_region_add_rect(reg, &rect);
     }
     index = 0;

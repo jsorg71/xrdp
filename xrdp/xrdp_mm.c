@@ -1202,7 +1202,7 @@ xrdp_mm_egfx_caps_advertise(void *user, int caps_count,
         ver_flags[index].version = versions[index];
         ver_flags[index].flags = flagss[index];
     }
-    /* sort by versiion */
+    /* sort by version */
     g_qsort(ver_flags, caps_count, sizeof(struct ver_flags_t), cmpverfunc);
     best_index = -1;
     best_h264_index = -1;
