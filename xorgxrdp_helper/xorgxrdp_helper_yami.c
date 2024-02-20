@@ -27,6 +27,8 @@
 #include <epoxy/gl.h>
 #include <epoxy/egl.h>
 
+#include <libdrm/drm_fourcc.h>
+
 #include "encoder_headers/yami_inf.h"
 
 #include "arch.h"
@@ -52,6 +54,11 @@ static struct yami_funcs g_enc_funcs;
 static long g_lib = 0;
 
 static int g_fd = -1;
+
+static const EGLint g_create_image_attr[] =
+{
+    EGL_NONE
+};
 
 struct enc_info
 {
@@ -176,10 +183,77 @@ xorgxrdp_helper_yami_delete_encoder(struct enc_info *ei)
     return 0;
 }
 
-static const EGLint g_create_image_attr[] =
+/*****************************************************************************/
+static enum encoder_result
+xorgxrdp_helper_yami_encode2(struct enc_info *ei,
+                             void *cdata, int *cdata_bytes)
 {
-    EGL_NONE
-};
+    int error;
+    int enc_flags = 0;
+    enum encoder_result rv = ENCODER_ERROR;
+
+    if ((xrdp_invalidate > 0) || (ei->frameCount == 0))
+    {
+        LOG(LOG_LEVEL_INFO, "Forcing YAMI H264 Keyframe for frame id: %d,"
+            "invalidate is: %d", ei->frameCount, xrdp_invalidate);
+        xrdp_invalidate = MAX(0, xrdp_invalidate - 1);
+        enc_flags |= YI_H264_ENC_FLAG_KEYFRAME;
+    }
+    error = g_enc_funcs.yami_encoder_encode_flags(ei->enc, cdata, cdata_bytes,
+            enc_flags);
+    LOG_DEVEL(LOG_LEVEL_INFO, "encoder_encode rv %d cdata_bytes %d",
+              error, *cdata_bytes);
+    if (error == YI_SUCCESS)
+    {
+        ei->frameCount++;
+        rv = (enc_flags | YI_H264_ENC_FLAG_KEYFRAME) ?
+        KEY_FRAME_ENCODED : INCREMENTAL_FRAME_ENCODED;
+    }
+    else
+    {
+        LOG(LOG_LEVEL_ERROR, "yami_encoder_encode failed");
+    }
+    return rv;
+}
+
+/*****************************************************************************/
+static enum encoder_result
+xorgxrdp_helper_yami_encode1(struct enc_info *ei, EGLImageKHR image,
+                             void *cdata, int *cdata_bytes)
+{
+    int error;
+    int fd;
+    EGLint stride;
+    EGLint offset;
+    enum encoder_result rv = ENCODER_ERROR;
+
+    if (eglExportDMABUFImageMESA(g_egl_display, image, &fd,
+                                 &stride, &offset))
+    {
+        /* glFinish() so fd is valid */
+        glFinish();
+        LOG_DEVEL(LOG_LEVEL_INFO, "fd %d stride %d offset %d", fd,
+                  stride, offset);
+        LOG_DEVEL(LOG_LEVEL_INFO, "width %d height %d", ei->width, ei->height);
+        error = g_enc_funcs.yami_encoder_set_fd_src(ei->enc, fd,
+                ei->width, ei->height, stride, stride * ei->height, YI_YUY2);
+        LOG_DEVEL(LOG_LEVEL_INFO, "yami_encoder_set_fd_src rv %d", error);
+        if (error == YI_SUCCESS)
+        {
+            rv = xorgxrdp_helper_yami_encode2(ei, cdata, cdata_bytes);
+        }
+        else
+        {
+            LOG(LOG_LEVEL_ERROR, "yami_encoder_set_fd_src failed");
+        }
+        g_file_close(fd);
+    }
+    else
+    {
+        LOG(LOG_LEVEL_ERROR, "eglExportDMABUFImageMESA failed");
+    }
+    return rv;
+}
 
 /*****************************************************************************/
 enum encoder_result
@@ -188,14 +262,10 @@ xorgxrdp_helper_yami_encode(struct enc_info *ei, int tex,
 {
     EGLClientBuffer cb;
     EGLImageKHR image;
-    EGLint stride;
-    EGLint offset;
-    int fd;
-    int error;
-    int fourcc;
-    int num_planes;
-    int force_key_frame = 0;
-    EGLuint64KHR modifiers;
+    int fourcc = 0;
+    int num_planes = 0;
+    EGLuint64KHR modifiers = 0;
+    enum encoder_result rv = ENCODER_ERROR;
 
     LOG_DEVEL(LOG_LEVEL_INFO, "tex %d", tex);
     LOG_DEVEL(LOG_LEVEL_INFO, "g_egl_display %p", g_egl_display);
@@ -205,74 +275,40 @@ xorgxrdp_helper_yami_encode(struct enc_info *ei, int tex,
                               EGL_GL_TEXTURE_2D_KHR,
                               cb, g_create_image_attr);
     LOG_DEVEL(LOG_LEVEL_INFO, "image %p", image);
-    if (image == EGL_NO_IMAGE_KHR)
+    if (image != EGL_NO_IMAGE_KHR)
     {
-        LOG(LOG_LEVEL_ERROR, "eglCreateImageKHR failed");
-        return 1;
-    }
-    if (!eglExportDMABUFImageQueryMESA(g_egl_display, image,
-                                       &fourcc, &num_planes,
-                                       &modifiers))
-    {
-        LOG(LOG_LEVEL_ERROR, "eglExportDMABUFImageQueryMESA failed");
+        if (eglExportDMABUFImageQueryMESA(g_egl_display, image,
+                                          &fourcc, &num_planes,
+                                          &modifiers))
+        {
+            /* fourcc 0x34324241 '42BA' DRM_FORMAT_ABGR8888 */
+            LOG_DEVEL(LOG_LEVEL_INFO, "fourcc 0x%8.8X num_planes %d "
+                      "modifiers %d",
+                      fourcc, num_planes, (int) modifiers);
+            /* we create this texture as GL_RGBA8 and we 'va import'
+               it as YUY2, shader sets the pixels accordingly */
+            if ((num_planes == 1) && (fourcc == DRM_FORMAT_ABGR8888))
+            {
+                rv = xorgxrdp_helper_yami_encode1(ei, image,
+                                                  cdata, cdata_bytes);
+            }
+            else
+            {
+                LOG(LOG_LEVEL_ERROR, "eglExportDMABUFImageQueryMESA return "
+                    "bad num_planes %d expected 1 or "
+                    "bad fourcc 0x%8.8x expected 0x%8.8x",
+                    num_planes, fourcc, DRM_FORMAT_ABGR8888);
+            }
+        }
+        else
+        {
+            LOG(LOG_LEVEL_ERROR, "eglExportDMABUFImageQueryMESA failed");
+        }
         eglDestroyImageKHR(g_egl_display, image);
-        return 1;
-    }
-    LOG_DEVEL(LOG_LEVEL_INFO, "fourcc 0x%8.8X num_planes %d modifiers %d",
-              fourcc, num_planes, (int) modifiers);
-    if (num_planes != 1)
-    {
-        LOG(LOG_LEVEL_ERROR, "eglExportDMABUFImageQueryMESA return "
-            "bad num_planes %d", num_planes);
-        eglDestroyImageKHR(g_egl_display, image);
-        return 1;
-    }
-    if (!eglExportDMABUFImageMESA(g_egl_display, image, &fd,
-                                  &stride, &offset))
-    {
-        LOG(LOG_LEVEL_ERROR, "eglExportDMABUFImageMESA failed");
-        eglDestroyImageKHR(g_egl_display, image);
-        return 1;
-    }
-    LOG_DEVEL(LOG_LEVEL_INFO, "fd %d stride %d offset %d", fd,
-              stride, offset);
-    LOG_DEVEL(LOG_LEVEL_INFO, "width %d height %d", ei->width, ei->height);
-    error = g_enc_funcs.yami_encoder_set_fd_src(ei->enc, fd,
-            ei->width, ei->height,
-            stride,
-            stride * ei->height,
-            YI_YUY2);
-    LOG_DEVEL(LOG_LEVEL_INFO, "yami_encoder_set_fd_src rv %d", error);
-    if (error != YI_SUCCESS)
-    {
-        LOG(LOG_LEVEL_ERROR, "yami_encoder_set_fd_src failed");
-        g_file_close(fd);
-        eglDestroyImageKHR(g_egl_display, image);
-        return 1;
-    }
-    if (xrdp_invalidate > 0 || ei->frameCount == 0)
-    {
-        LOG(LOG_LEVEL_INFO, "Forcing YAMI H264 Keyframe for frame id: %d,"
-            "invalidate is: %d", ei->frameCount, xrdp_invalidate);
-        xrdp_invalidate = MAX(0, xrdp_invalidate - 1);
-        force_key_frame = 1;
-    }
-    error = g_enc_funcs.yami_encoder_encode(ei->enc, cdata, cdata_bytes,
-                                            force_key_frame);
-    LOG_DEVEL(LOG_LEVEL_INFO, "encoder_encode rv %d cdata_bytes %d",
-              error, *cdata_bytes);
-    if (error != YI_SUCCESS)
-    {
-        LOG(LOG_LEVEL_ERROR, "yami_encoder_encode failed");
-        g_file_close(fd);
-        eglDestroyImageKHR(g_egl_display, image);
-        return 1;
     }
     else
     {
-        ei->frameCount++;
+        LOG(LOG_LEVEL_ERROR, "eglCreateImageKHR failed");
     }
-    g_file_close(fd);
-    eglDestroyImageKHR(g_egl_display, image);
-    return force_key_frame ? KEY_FRAME_ENCODED : INCREMENTAL_FRAME_ENCODED;
+    return rv;
 }

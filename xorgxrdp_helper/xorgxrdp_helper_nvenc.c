@@ -313,6 +313,9 @@ xorgxrdp_helper_nvenc_encode(struct enc_info *ei, int tex,
     NVENCSTATUS nv_error;
     enum encoder_result rv;
 
+    /* sync before encoding */
+    glFinish();
+
     g_memset(&picParams, 0, sizeof(picParams));
     picParams.version = NV_ENC_PIC_PARAMS_VER;
     picParams.inputBuffer = ei->mappedResource;

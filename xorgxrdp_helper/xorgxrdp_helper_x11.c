@@ -47,6 +47,12 @@
 #include "xorgxrdp_helper_egl.h"
 #include "log.h"
 
+/* set to 1 to dump bmp files into /tmp */
+#define XR_DUMP_FRAMEBUFFER 0
+
+/* set to 1 to dump bmp files into /tmp */
+#define XR_DUMP_PIXMAP 0
+
 #if defined(XRDP_NVENC)
 #include "xorgxrdp_helper_nvenc.h"
 #endif
@@ -711,6 +717,32 @@ xorgxrdp_helper_x11_create_pixmap(int width, int height, int magic,
     return 0;
 }
 
+#if XR_DUMP_FRAMEBUFFER
+
+static int g_framebuffer_file_index = 0;
+
+/*****************************************************************************/
+static int
+save_fb_to_file(int width, int height)
+{
+    char *pixels;
+    char filename[256];
+
+    pixels = (char *) g_malloc(width * height * 4, 0);
+    if (pixels != NULL)
+    {
+        glReadPixels(0, 0, width / 2, height, GL_BGRA,
+                     GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
+        snprintf(filename, 255, "/tmp/gl_surface%8.8x.bmp",
+                 g_framebuffer_file_index++);
+        g_save_to_bmp(filename, pixels, width * 2, width / 2, height, 24, 32);
+        g_free(pixels);
+    }
+    return 0;
+}
+
+#endif
+
 /*****************************************************************************/
 static void
 xorgxrdp_helper_x11_run_shader(int left, int top, int width, int height,
@@ -762,11 +794,36 @@ xorgxrdp_helper_x11_run_shader(int left, int top, int width, int height,
     glDeleteBuffers(1, &vbo);
     glDeleteVertexArrays(1, &vao);
     g_free(vertices);
+#if XR_DUMP_FRAMEBUFFER
+    save_fb_to_file(width, height);
+#endif
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     g_inf_funcs[g_inf].release_tex_image(mi->inf_image);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
 }
+
+#if XR_DUMP_PIXMAP
+
+static int g_pixmap_file_index = 0;
+
+/*****************************************************************************/
+static int
+save_pixmap_to_file(Pixmap pix, int width, int height)
+{
+    XImage *image;
+    char filename[256];
+
+    image = XGetImage(g_display, pix, 0, 0, width, height, AllPlanes, ZPixmap);
+    if (image != NULL)
+    {
+        snprintf(filename, 255, "/tmp/pixmap%8.8x.bmp", g_pixmap_file_index++);
+        g_save_to_bmp(filename, image->data, width * 4, width, height, 24, 32);
+        XFree(image);
+    }
+    return 0;
+}
+#endif
 
 /*****************************************************************************/
 enum encoder_result
@@ -791,12 +848,14 @@ xorgxrdp_helper_x11_encode_pixmap(int left, int top, int width, int height,
             width, mi->width, height, mi->height);
         return ENCODER_ERROR;
     }
+#if XR_DUMP_PIXMAP
+    save_pixmap_to_file(mi->pixmap, width, height);
+#endif
     si = g_si + mi->tex_format % XH_NUM_SHADERS;
     xorgxrdp_helper_x11_run_shader(left, top, width, height, mi, si,
                                    num_crects, crects);
-    /* sync before encoding */
+    /* flush before encoding, let encoders call glFinish() as needed */
     XFlush(g_display);
-    glFinish();
     /* encode */
     rv = g_enc_funcs[g_enc].encode(mi->ei, mi->enc_texture,
                                    cdata, cdata_bytes);
