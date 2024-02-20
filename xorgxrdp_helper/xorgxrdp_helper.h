@@ -37,8 +37,8 @@ struct xh_rect
 
 enum encoder_result
 {
-    INCREMENTAL_FRAME_ENCODED,
-    KEY_FRAME_ENCODED,
+    INCREMENTAL_FRAME_ENCODED,  /* P frame */
+    KEY_FRAME_ENCODED,          /* IDR frame */
     ENCODER_ERROR
 };
 
