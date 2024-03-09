@@ -3596,8 +3596,11 @@ xrdp_mm_process_enc_done(struct xrdp_mm *self)
                 y = enc_done->y;
                 cx = enc_done->cx;
                 cy = enc_done->cy;
-                libxrdp_fastpath_send_frame_marker(self->wm->session, 0,
-                                                   enc_done->frame_id);
+                if (client_ack)
+                {
+                    libxrdp_fastpath_send_frame_marker(self->wm->session, 0,
+                                                       enc_done->frame_id);
+                }
                 libxrdp_fastpath_send_surface(self->wm->session,
                                               enc_done->comp_pad_data,
                                               enc_done->pad_bytes,
@@ -3605,8 +3608,11 @@ xrdp_mm_process_enc_done(struct xrdp_mm *self)
                                               x, y, x + cx, y + cy,
                                               32, self->encoder->codec_id,
                                               cx, cy);
-                libxrdp_fastpath_send_frame_marker(self->wm->session, 1,
-                                                   enc_done->frame_id);
+                if (client_ack)
+                {
+                    libxrdp_fastpath_send_frame_marker(self->wm->session, 1,
+                                                       enc_done->frame_id);
+                }
             }
         }
         /* free enc_done */
