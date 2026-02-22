@@ -185,7 +185,7 @@ scp_connect(const  char *port,
     struct trans *t;
 
     (void)scp_port_to_unix_domain_path(port, sock_path, sizeof(sock_path));
-    if ((t = trans_create(TRANS_MODE_UNIX, 128, 128)) != NULL)
+    if ((t = trans_create(TRANS_MODE_UNIX, 8192, 8192)) != NULL)
     {
         t->is_term = term_func;
 
@@ -221,7 +221,7 @@ struct trans *
 scp_init_trans_from_fd(int fd, int trans_type, int (*term_func)(void))
 {
     struct trans *result;
-    if ((result = trans_create(TRANS_MODE_UNIX, 128, 128)) == NULL)
+    if ((result = trans_create(TRANS_MODE_UNIX, 8192, 8192)) == NULL)
     {
         LOG(LOG_LEVEL_ERROR, "Can't create SCP transport [%s]",
             g_get_strerror());
@@ -918,4 +918,54 @@ scp_send_close_connection_request(struct trans *trans)
                trans,
                (int)E_SCP_CLOSE_CONNECTION_REQUEST,
                NULL);
+}
+
+/*****************************************************************************/
+
+int
+scp_send_prompt_request(struct trans *trans, const char *prompt, int flags)
+{
+    return libipm_msg_out_simple_send(
+               trans,
+               (int)E_SCP_PROMPT_REQUEST,
+               "si", prompt, flags);
+}
+
+/*****************************************************************************/
+
+int
+scp_get_prompt_request(struct trans *trans, char *prompt, int prompt_max, int *flags)
+{
+    char *lprompt = NULL;
+    int rv = libipm_msg_in_parse(trans, "si", &lprompt, flags);
+    if (rv == 0)
+    {
+        g_snprintf(prompt, prompt_max, "%s", lprompt);
+    }
+    return rv;
+}
+
+/*****************************************************************************/
+
+int
+scp_send_prompt_response(struct trans *trans, const char *response)
+{
+    return libipm_msg_out_simple_send(
+               trans,
+               (int)E_SCP_PROMPT_RESPONSE,
+               "s", response);
+}
+
+/*****************************************************************************/
+
+int
+scp_get_prompt_response(struct trans *trans, char *response, int response_max)
+{
+    char *lresponse = NULL;
+    int rv = libipm_msg_in_parse(trans, "s", &lresponse);
+    if (rv == 0)
+    {
+        g_snprintf(response, response_max, "%s", lresponse);
+    }
+    return rv;
 }

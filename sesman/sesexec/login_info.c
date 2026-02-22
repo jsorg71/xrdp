@@ -78,7 +78,8 @@ static enum scp_login_status
 authenticate_and_authorize_connection(const char *supplied_username,
                                       const char *password,
                                       const char *ip_addr,
-                                      struct login_info *login_info)
+                                      struct login_info *login_info,
+                                      struct trans *scp_trans)
 {
     int uid;
     char *username; // From reverse-looking up the UID
@@ -116,7 +117,7 @@ authenticate_and_authorize_connection(const char *supplied_username,
                 username, uid);
         }
 
-        auth_info = auth_userpass(username, password, ip_addr, &status);
+        auth_info = auth_userpass(username, password, ip_addr, &status, scp_trans);
 
         /* Sanity check on result of call */
         if ((auth_info != NULL && status != E_SCP_LOGIN_OK) ||
@@ -266,7 +267,8 @@ login_info_sys_login_user(struct trans *scp_trans,
             status = authenticate_and_authorize_connection(username,
                      password,
                      ip_addr,
-                     result);
+                     result,
+                     scp_trans);
 
             if (status != E_SCP_LOGIN_OK)
             {
