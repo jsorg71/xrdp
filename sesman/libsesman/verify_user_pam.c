@@ -205,7 +205,7 @@ verify_pam_conv(int num_msg, const struct pam_message **msg,
     {
         for (i = 0; i < num_msg && rv == PAM_SUCCESS; i++)
         {
-            LOG(LOG_LEVEL_INFO, "Handling struct pam_message"
+            LOG_DEVEL(LOG_LEVEL_INFO, "Handling struct pam_message"
                       " { style = %s, msg = \"%s\" } pid %d",
                       msg_style_to_str(msg[i]->msg_style, sb, sizeof (sb)),
                       msg[i]->msg == NULL ? "<null>" : msg[i]->msg, g_getpid());
@@ -227,9 +227,8 @@ verify_pam_conv(int num_msg, const struct pam_message **msg,
                     //     reply[i].resp = g_strdup(conv_func_data->pass);
                     // }
 
-                    printf("off %s", msg[i]->msg);
+                    g_writeln("PAM_PROMPT_ECHO_OFF %s", msg[i]->msg);
                     fflush(stdout);
-                    //printf("1");
 
                     disable_echo();
 
@@ -241,15 +240,13 @@ verify_pam_conv(int num_msg, const struct pam_message **msg,
                         break;
                     }
                     enable_echo();
-                    //printf("2");
                     reply[i].resp = strdup(buf);
-                    printf("3");
                 
                     break;
 
                 case PAM_PROMPT_ECHO_ON:
                     /* Obtain a string whilst echoing text */
-                    printf("on %s", msg[i]->msg);
+                    g_writeln("PAM_PROMPT_ECHO_ON %s", msg[i]->msg);
                     fflush(stdout);
 
                     if (read_line(buf, sizeof(buf)) != 0)
@@ -263,11 +260,13 @@ verify_pam_conv(int num_msg, const struct pam_message **msg,
 
 
                 case PAM_ERROR_MSG:
-                    LOG(LOG_LEVEL_ERROR, "PAM: %s", msg[i]->msg);
+                    g_writeln("PAM_ERROR_MSG %s", msg[i]->msg);
+                    //LOG(LOG_LEVEL_ERROR, "PAM: %s", msg[i]->msg);
                     break;
 
                 case PAM_TEXT_INFO:
-                    LOG(LOG_LEVEL_INFO, "PAM: %s", msg[i]->msg);
+                    g_writeln("PAM_TEXT_INFO %s", msg[i]->msg);
+                    //LOG(LOG_LEVEL_INFO, "PAM: %s", msg[i]->msg);
                     break;
 
                 default:
