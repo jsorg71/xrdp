@@ -37,6 +37,24 @@
 #include <stdio.h>
 #include <security/pam_appl.h>
 
+
+
+
+
+//#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <getopt.h>
+#include <unistd.h>
+#include <termios.h>
+#include <security/pam_appl.h>
+
+
+
+
+
+
 /* Allows the conversation function to find required items */
 struct conv_func_data
 {
@@ -89,6 +107,57 @@ msg_style_to_str(int msg_style, char *buff, unsigned int bufflen)
     return result;
 }
 
+static int
+read_line(char *buf, size_t buflen)
+{
+    if (buf == NULL || buflen == 0)
+        return -1;
+
+    if (fgets(buf, buflen, stdin) == NULL)
+        return -1;
+
+    size_t len = strlen(buf);
+    if (len > 0 && buf[len - 1] == '\n')
+        buf[len - 1] = '\0';
+
+    return 0;
+}
+
+static struct termios saved_termios;
+static int termios_saved = 0;
+
+static int
+disable_echo()
+{
+    struct termios t;
+
+    if (!isatty(STDIN_FILENO))
+        return 0;
+
+    if (tcgetattr(STDIN_FILENO, &saved_termios) != 0)
+        return -1;
+
+    termios_saved = 1;
+
+    t = saved_termios;
+    t.c_lflag &= ~ECHO;
+    t.c_lflag |= ECHONL;
+
+    return tcsetattr(STDIN_FILENO, TCSAFLUSH, &t);
+}
+
+/****************************************************************************/
+
+static void
+enable_echo()
+{
+    if (termios_saved && isatty(STDIN_FILENO))
+    {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved_termios);
+        termios_saved = 0;
+    }
+}
+
 /***************************************************************************//**
  * Provides the PAM conversation callback function
  *
@@ -122,6 +191,7 @@ verify_pam_conv(int num_msg, const struct pam_message **msg,
     struct conv_func_data *conv_func_data;
     char sb[64];
     int rv = PAM_SUCCESS;
+    char buf[512];
 
     if (num_msg <= 0 || num_msg > PAM_MAX_NUM_MSG)
     {
@@ -135,28 +205,62 @@ verify_pam_conv(int num_msg, const struct pam_message **msg,
     {
         for (i = 0; i < num_msg && rv == PAM_SUCCESS; i++)
         {
-            LOG_DEVEL(LOG_LEVEL_INFO, "Handling struct pam_message"
-                      " { style = %s, msg = \"%s\" }",
+            LOG(LOG_LEVEL_INFO, "Handling struct pam_message"
+                      " { style = %s, msg = \"%s\" } pid %d",
                       msg_style_to_str(msg[i]->msg_style, sb, sizeof (sb)),
-                      msg[i]->msg == NULL ? "<null>" : msg[i]->msg);
+                      msg[i]->msg == NULL ? "<null>" : msg[i]->msg, g_getpid());
 
             switch (msg[i]->msg_style)
             {
                 case PAM_PROMPT_ECHO_OFF: /* password */
-                    conv_func_data = (struct conv_func_data *) appdata_ptr;
-                    /* Check this function isn't being called
-                     * later than we expected */
-                    if (conv_func_data == NULL || conv_func_data->pass == NULL)
+                    // conv_func_data = (struct conv_func_data *) appdata_ptr;
+                    // /* Check this function isn't being called
+                    //  * later than we expected */
+                    // if (conv_func_data == NULL || conv_func_data->pass == NULL)
+                    // {
+                    //     LOG(LOG_LEVEL_ERROR,
+                    //         "verify_pam_conv: Password unavailable");
+                    //     reply[i].resp = g_strdup("????");
+                    // }
+                    // else
+                    // {
+                    //     reply[i].resp = g_strdup(conv_func_data->pass);
+                    // }
+
+                    printf("off %s", msg[i]->msg);
+                    fflush(stdout);
+                    //printf("1");
+
+                    disable_echo();
+
+                    if (read_line(buf, sizeof(buf)) != 0)
                     {
-                        LOG(LOG_LEVEL_ERROR,
-                            "verify_pam_conv: Password unavailable");
-                        reply[i].resp = g_strdup("????");
+                        enable_echo();
+                        reply[i].resp = NULL;
+                        rv = PAM_CONV_ERR;
+                        break;
                     }
-                    else
-                    {
-                        reply[i].resp = g_strdup(conv_func_data->pass);
-                    }
+                    enable_echo();
+                    //printf("2");
+                    reply[i].resp = strdup(buf);
+                    printf("3");
+                
                     break;
+
+                case PAM_PROMPT_ECHO_ON:
+                    /* Obtain a string whilst echoing text */
+                    printf("on %s", msg[i]->msg);
+                    fflush(stdout);
+
+                    if (read_line(buf, sizeof(buf)) != 0)
+                    {
+                        reply[i].resp = NULL;
+                        rv = PAM_CONV_ERR;
+                        break;
+                    }
+                    reply[i].resp = strdup(buf);
+                    break;
+
 
                 case PAM_ERROR_MSG:
                     LOG(LOG_LEVEL_ERROR, "PAM: %s", msg[i]->msg);
@@ -304,8 +408,19 @@ common_pam_login(struct auth_info *auth_info,
        been authenticated.
      */
     perror = pam_acct_mgmt(auth_info->ph, 0);
-
-    if (perror != PAM_SUCCESS)
+    if (perror == PAM_NEW_AUTHTOK_REQD)
+    {
+        /* password has expired and needs to be changed */
+        perror = pam_chauthtok(auth_info->ph, PAM_CHANGE_EXPIRED_AUTHTOK);
+        if (perror != PAM_SUCCESS)
+        {
+            LOG(LOG_LEVEL_ERROR, "pam_chauthtok failed: %s",
+                pam_strerror(auth_info->ph, perror));
+            pam_end(auth_info->ph, perror);
+            return E_SCP_LOGIN_NOT_AUTHORIZED;
+        }
+    }
+    else if (perror != PAM_SUCCESS)
     {
         LOG(LOG_LEVEL_ERROR, "pam_acct_mgmt failed: %s",
             pam_strerror(auth_info->ph, perror));
