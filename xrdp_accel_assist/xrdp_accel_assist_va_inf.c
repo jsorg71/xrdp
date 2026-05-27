@@ -248,10 +248,10 @@ xrdp_accel_assist_va_inf_encode(struct enc_info *ei, int tex,
               stride, offset);
     LOG_DEVEL(LOG_LEVEL_INFO, "width %d height %d", ei->width, ei->height);
     error = g_enc_funcs.encoder_set_fd_src(ei->enc, fd,
-            ei->width, ei->height,
-            stride,
-            stride * ei->height,
-            VI_YUY2);
+                                           ei->width, ei->height,
+                                           stride,
+                                           stride * ei->height,
+                                           VI_YUY2);
     LOG_DEVEL(LOG_LEVEL_INFO, "encoder_set_fd_src rv %d", error);
     if (error != VI_SUCCESS)
     {
@@ -266,7 +266,7 @@ xrdp_accel_assist_va_inf_encode(struct enc_info *ei, int tex,
         va_inf_flags = VI_H264_ENC_FLAG_KEYFRAME;
     }
     error = g_enc_funcs.encoder_encode_flags(ei->enc, cdata, cdata_bytes,
-                                             va_inf_flags);
+                       va_inf_flags);
     LOG_DEVEL(LOG_LEVEL_INFO, "encoder_encode rv %d cdata_bytes %d",
               error, *cdata_bytes);
     if (error != VI_SUCCESS)
