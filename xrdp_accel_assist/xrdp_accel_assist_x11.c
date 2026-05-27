@@ -57,6 +57,10 @@
 #include "xrdp_accel_assist_nvenc.h"
 #endif
 
+#if defined(XRDP_VA_INF)
+#include "xrdp_accel_assist_va_inf.h"
+#endif
+
 /* X11 */
 Display *g_display = NULL;
 static int g_x_socket = 0;
@@ -81,7 +85,14 @@ struct enc_funcs
 static struct enc_funcs g_enc_funcs[] =
 {
     {
+#if defined(XRDP_VA_INF)
+        xrdp_accel_assist_va_inf_init,
+        xrdp_accel_assist_va_inf_create_encoder,
+        xrdp_accel_assist_va_inf_delete_encoder,
+        xrdp_accel_assist_va_inf_encode
+#else
         NULL, NULL, NULL, NULL
+#endif
     },
     {
 #if defined(XRDP_NVENC)

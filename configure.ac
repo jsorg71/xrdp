@@ -173,8 +173,15 @@ AC_ARG_ENABLE(nvenc, AS_HELP_STRING([--enable-nvenc],
                XRDP_NVENC_LIBS should be set if used]),
               [], [enable_nvenc=no])
 AM_CONDITIONAL(XRDP_NVENC, [test x$enable_nvenc = xyes])
+
+AC_ARG_ENABLE(va_inf, AS_HELP_STRING([--enable-va_inf],
+              [Use va_inf library (default: no), env vars XRDP_VA_INF_CFLAGS and
+               XRDP_VA_INF_LIBS should be set if used]),
+              [], [enable_va_inf=no])
+AM_CONDITIONAL(XRDP_VA_INF, [test x$enable_va_inf = xyes])
+
 AC_ARG_ENABLE(accel, AS_HELP_STRING([--enable-accel],
-              [Build xrdp_accel_assist (default: no, auto set if --enable-nvenc)]),
+              [Build xrdp_accel_assist (default: no, auto set if --enable-nvenc or --enable-va_inf)]),
               [], [enable_accel=no])
 # AM_CONDITIONAL(XRDP_ACCEL, [test x$enable_accel = xyes]) later in this file
 AC_ARG_ENABLE(painter, AS_HELP_STRING([--disable-painter],
@@ -508,6 +515,19 @@ then
 fi
 fi
 
+if test "x$enable_va_inf" = "xyes"
+then
+enable_accel=$enable_va_inf
+if test ! -z "$XRDP_VA_INF_CFLAGS"
+then
+  AC_SUBST(XRDP_VA_INF_CFLAGS, ["$XRDP_VA_INF_CFLAGS"])
+fi
+if test ! -z "$XRDP_VA_INF_LIBS"
+then
+  AC_SUBST(XRDP_VA_INF_LIBS, ["$XRDP_VA_INF_LIBS"])
+fi
+fi
+
 AM_CONDITIONAL(XRDP_ACCEL, [test x$enable_accel = xyes])
 
 # checking for TurboJPEG
@@ -694,6 +714,7 @@ echo "  rfxcodec                        $enable_rfxcodec"
 echo "  x264                            $enable_x264"
 echo "  openh264                        $enable_openh264"
 echo "  nvenc                           $enable_nvenc"
+echo "  va_inf                          $enable_va_inf"
 echo "  accel                           $enable_accel"
 echo "  painter                         $enable_painter"
 echo "  pixman                          $enable_pixman"

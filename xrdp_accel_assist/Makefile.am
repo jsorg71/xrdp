@@ -13,6 +13,13 @@ XRDP_EXTRA_LIBS += $(XRDP_NVENC_LIBS)
 XRDP_EXTRA_SOURCES += xrdp_accel_assist_nvenc.c xrdp_accel_assist_nvenc.h encoder_headers/nvEncodeAPI_11_1.h
 endif
 
+if XRDP_VA_INF
+AM_CPPFLAGS += -DXRDP_VA_INF
+AM_CPPFLAGS += $(XRDP_VA_INF_CFLAGS)
+XRDP_EXTRA_LIBS += $(XRDP_VA_INF_LIBS)
+XRDP_EXTRA_SOURCES += xrdp_accel_assist_va_inf.c xrdp_accel_assist_va_inf.h encoder_headers/va_inf.h
+endif
+
 pkglibexec_PROGRAMS = \
   xrdp-accel-assist
 
