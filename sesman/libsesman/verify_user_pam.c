@@ -124,7 +124,7 @@ conv_echo_off(struct conv_func_data *cf_data, const struct pam_message *msg,
         {
             error = scp_msg_in_wait_available(cf_data->scp_trans);
             LOG_DEVEL(LOG_LEVEL_INFO, "scp_msg_in_wait_available %d", error);
-            code = error == 0 ? scp_msg_in_get_msgno(cf_data->scp_trans) : 0;
+            code = error == 0 ? scp_msg_in_get_msgno(cf_data->scp_trans) : E_SCP_END;
             if (code == E_SCP_PROMPT_CANCEL)
             {
                 cf_data->cancelled = 1;
@@ -185,7 +185,7 @@ conv_echo_on(struct conv_func_data *cf_data, const struct pam_message *msg,
         {
             error = scp_msg_in_wait_available(cf_data->scp_trans);
             LOG_DEVEL(LOG_LEVEL_INFO, "scp_msg_in_wait_available %d", error);
-            code = error == 0 ? scp_msg_in_get_msgno(cf_data->scp_trans) : 0;
+            code = error == 0 ? scp_msg_in_get_msgno(cf_data->scp_trans) : E_SCP_END;
             if (code == E_SCP_PROMPT_CANCEL)
             {
                 cf_data->cancelled = 1;
